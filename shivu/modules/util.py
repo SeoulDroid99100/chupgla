@@ -55,6 +55,6 @@ def get_system_info():
 """
 
 @shivuu.on_message(filters.command("util") & filters.private)
-async def util_cmd(client: Client, message: Message):
+async def util_cmd(client, message):
     system_info = get_system_info()
     await message.reply_text(system_info)
