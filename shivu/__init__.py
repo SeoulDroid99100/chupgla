@@ -41,3 +41,11 @@ user_collection = db["user_collection_lmaoooo"]
 group_user_totals_collection = db['group_user_totalsssssss']
 top_global_groups_collection = db['top_global_groups']
 pm_users = db['total_pm_users']
+# Add new collections for Lundmate UX
+lundmate_players = db['players_lundmate']
+lundmate_lunds = db['lunds']
+lundmate_pvp = db['pvp_battles']
+lundmate_leaderboard = db['leaderboard_lundmate']
+lundmate_loans = db['loans_lundmate']
+
+LOGGER.info("Lundmate UX collections initialized successfully! 🌱✨")
