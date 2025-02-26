@@ -1,6 +1,6 @@
 from pyrogram import filters
 from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
-from shivu import shivuu, lundmate_store, lundmate_players
+from shivu import shivuu, lundmate_store, lundmate_players, lundmate_inventory
 
 # Admin ID (you can add multiple admin IDs in the list)
 ADMIN_IDS = [6783092268]  # Replace with your admin ID
@@ -66,10 +66,21 @@ async def buy_item(client, callback_query: Message):
         {"$inc": {"laudacoin": -item["price"]}}
     )
     
-    # Add the item to the player's inventory
+    # Add the item to the `lundmate_inventory` collection
+    new_inventory_item = {
+        "user_id": user_id,
+        "item_name": item_name,
+        "price": item["price"],
+        "purchased_at": callback_query.date
+    }
+    
+    # Insert item into inventory collection
+    await lundmate_inventory.insert_one(new_inventory_item)
+    
+    # Optionally, add the item reference to player's inventory array
     await lundmate_players.update_one(
         {"user_id": user_id},
-        {"$push": {"inventory": item_name}}
+        {"$push": {"inventory": item_name}}  # This could be item ID or other references
     )
     
     await callback_query.answer(f"✅ You have successfully purchased **{item_name}** for **{item['price']} Laudacoin**!", show_alert=True)
