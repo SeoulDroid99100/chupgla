@@ -239,8 +239,8 @@ def main() -> None:
 
     application.add_handler(CommandHandler(["guess", "protecc", "collect", "grab", "hunt"], guess, block=False))
     application.add_handler(CommandHandler("fav", fav, block=False))
+    application.add_handler(CommandHandler("util", shivu.modules.util.util_cmd, block=False))
     application.add_handler(MessageHandler(filters.ALL, message_counter, block=False))
-
     application.run_polling(drop_pending_updates=True)
     
 if __name__ == "__main__":
