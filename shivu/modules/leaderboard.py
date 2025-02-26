@@ -1,4 +1,4 @@
-import os
+"""import os
 import random
 import html
 
@@ -154,3 +154,4 @@ application.add_handler(CommandHandler('groups', send_groups_document, block=Fal
 
 application.add_handler(CommandHandler('top', leaderboard, block=False))
 
+"""
