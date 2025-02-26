@@ -1,77 +1,79 @@
 from pyrogram import filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from shivu import shivuu, lundmate_players
 
-@shivuu.on_message(filters.command(["ltop", "top", "leaderboard", "lboard"]))
-async def leaderboard(client, message: Message):
-    """Fetch and display the leaderboard dynamically (Group First)."""
+async def get_leaderboard(group_id=None, sort_by="lund_size"):
+    """ Fetch top 10 players sorted by Lund Size or Laudacoin. 
+        If group_id is provided, fetch only from that group.
+    """
+    query = {}
+    if group_id:
+        query["group_id"] = group_id  # Filter for group-specific leaderboard
 
-    chat_id = message.chat.id  # Fetch the chat ID for group rankings
+    top_players = lundmate_players.find(query).sort(sort_by, -1).limit(10)
 
-    # Fetch top players within this specific chat
-    top_players = await lundmate_players.find({"chat_id": chat_id}).sort("lund_size", -1).to_list(10)
-
-    # If no group players, fallback to global leaderboard
-    if not top_players:
-        leaderboard_text = "⚠️ No active players in this group. Switching to Global Leaderboard.\n\n"
-        top_players = await lundmate_players.find().sort("lund_size", -1).to_list(10)
-        is_global = True
+    leaderboard_text = "**🏆 Lundmate Leaderboard 🏆**\n"
+    if group_id:
+        leaderboard_text += "**(Group Only) 🏛️**\n"
     else:
-        leaderboard_text = "🏆 **Group Leaderboard**\n\n"
-        is_global = False
+        leaderboard_text += "**(Global Rankings) 🌍**\n"
 
-    for rank, player in enumerate(top_players, 1):
-        name = player.get("name", "Unknown")
-        size = player.get("lund_size", 1.0)
-        league = player.get("league", "Grunt 🌱")
-        leaderboard_text += f"{rank}. **{name}** — {size:.1f} cm | {league}\n"
+    position = 1
+    async for player in top_players:
+        leaderboard_text += f"**{position}. {player['name']}**\n"
+        leaderboard_text += f"📏 **Size:** {player['lund_size']} cm | 💰 **Coins:** {player['laudacoin']} 🪙\n"
+        position += 1
 
-    # Inline buttons
-    swap_text = "🌍 Swap to Global Leaderboard" if not is_global else "👥 Swap to Group Leaderboard"
-    swap_callback = f"swap_leaderboard:{chat_id}" if not is_global else "leaderboard"
+    return leaderboard_text
+
+@shivuu.on_message(filters.command(["lboard", "top", "ltop"]) & filters.group)
+async def leaderboard(client, message: Message):
+    group_id = message.chat.id
+    leaderboard_text = await get_leaderboard(group_id=group_id)
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(swap_text, callback_data=swap_callback)],
-        [InlineKeyboardButton("🔄 Refresh", callback_data="refresh_leaderboard"),
-         InlineKeyboardButton("🗑️ Delete", callback_data="delete_leaderboard")]
+        [InlineKeyboardButton("🌍 Switch to Global", callback_data=f"switch_global_{group_id}")],
+        [InlineKeyboardButton("🔄 Switch to Coins", callback_data=f"switch_coins_{group_id}")],
+        [InlineKeyboardButton("🗑️ Delete", callback_data="delete_message")]
     ])
 
     await message.reply_text(leaderboard_text, reply_markup=keyboard)
 
-# Handler for swapping leaderboard modes
-@shivuu.on_callback_query(filters.regex(r"swap_leaderboard:(\d+)"))
-async def swap_leaderboard(client, callback_query):
-    chat_id = int(callback_query.matches[0].group(1))
+@shivuu.on_callback_query()
+async def handle_callback(client, callback_query):
+    data = callback_query.data.split("_")
+    action = data[0]
 
-    # Fetch global leaderboard
-    top_players = await lundmate_players.find().sort("lund_size", -1).to_list(10)
+    if action == "switch":
+        target = data[1]
+        group_id = int(data[2])
 
-    leaderboard_text = "🏆 **Global Leaderboard**\n\n"
-    
-    for rank, player in enumerate(top_players, 1):
-        name = player.get("name", "Unknown")
-        size = player.get("lund_size", 1.0)
-        league = player.get("league", "Grunt 🌱")
-        leaderboard_text += f"{rank}. **{name}** — {size:.1f} cm | {league}\n"
+        if target == "global":
+            leaderboard_text = await get_leaderboard()
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🏛️ Switch to Group", callback_data=f"switch_group_{group_id}")],
+                [InlineKeyboardButton("🔄 Switch to Coins", callback_data=f"switch_coins_global")],
+                [InlineKeyboardButton("🗑️ Delete", callback_data="delete_message")]
+            ])
+        elif target == "group":
+            leaderboard_text = await get_leaderboard(group_id=group_id)
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🌍 Switch to Global", callback_data=f"switch_global_{group_id}")],
+                [InlineKeyboardButton("🔄 Switch to Coins", callback_data=f"switch_coins_{group_id}")],
+                [InlineKeyboardButton("🗑️ Delete", callback_data="delete_message")]
+            ])
+        elif target == "coins":
+            scope = data[2]  # Either 'group' or 'global'
+            leaderboard_text = await get_leaderboard(group_id=(group_id if scope == "group" else None), sort_by="laudacoin")
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 Switch to Size", callback_data=f"switch_size_{scope}_{group_id}")],
+                [InlineKeyboardButton("🗑️ Delete", callback_data="delete_message")]
+            ])
 
-    # Update buttons to swap back to Group
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("👥 Swap to Group Leaderboard", callback_data=f"leaderboard")],
-        [InlineKeyboardButton("🔄 Refresh", callback_data="refresh_leaderboard"),
-         InlineKeyboardButton("🗑️ Delete", callback_data="delete_leaderboard")]
-    ])
+        await callback_query.message.edit_text(leaderboard_text, reply_markup=keyboard)
 
-    await callback_query.message.edit_text(leaderboard_text, reply_markup=keyboard)
-
-# Handler for refreshing leaderboard
-@shivuu.on_callback_query(filters.regex("refresh_leaderboard"))
-async def refresh_leaderboard(client, callback_query):
-    await leaderboard(client, callback_query.message)
-
-# Handler for safely deleting leaderboard message
-@shivuu.on_callback_query(filters.regex("delete_leaderboard"))
-async def delete_leaderboard(client, callback_query):
-    try:
-        await callback_query.message.delete()
-    except Exception:
-        await callback_query.answer("⚠️ Unable to delete message!", show_alert=True)
+    elif action == "delete_message":
+        if callback_query.from_user.id == 6783092268:  # Main Admin
+            await callback_query.message.delete()
+        else:
+            await callback_query.answer("🚫 You are not authorized to delete this!")
