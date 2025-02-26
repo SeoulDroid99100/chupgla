@@ -2,7 +2,7 @@ from pyrogram import filters
 from pyrogram.types import Message
 from shivuu import shivuu, lundmate_players
 
-@shivuu.on_message(filters.command(["profile", "lprofile"]) & filters.private)
+@shivuu.on_message(filters.command(["profile", "lprofile"]))
 async def view_profile(client, message: Message):
     user_id = message.from_user.id
     player = await lundmate_players.find_one({"user_id": user_id})
