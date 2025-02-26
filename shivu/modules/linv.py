@@ -1,7 +1,9 @@
 from pyrogram import filters
 from pyrogram.types import Message
 from shivu import shivuu, lundmate_players
-from shivu.config import OWNER_ID, sudo_users
+
+OWNER_ID = 6783092268 , "6783092268"
+sudo_users = 6783092268
 
 @shivuu.on_message(filters.command(["linventory", "inventory", "inv"]))
 async def view_inventory(client, message: Message):
