@@ -1,6 +1,7 @@
 import psutil
-from pyrogram import Client, filters
+from pyrogram import filters
 from pyrogram.types import Message
+from shivu import shivuu
 
 def get_system_info():
     cpu_percent = psutil.cpu_percent(interval=1)
