@@ -31,6 +31,10 @@ def run_flask():
 
 nest_asyncio.apply()
 
+for module_name in ALL_MODULES:
+    imported_module = importlib.import_module("shivu.modules." + module_name)
+
+
 
 
 
