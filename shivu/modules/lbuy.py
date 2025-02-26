@@ -37,10 +37,20 @@ async def buy_item(client, message: Message):
         await message.reply_text(f"❌ You don't have enough Laudacoin to buy **{quantity} x {item_name}**. Needed: {total_price} coins.")
         return
 
-    # Deduct coins from player and add the item to inventory
+    # Deduct coins from player
     await lundmate_players.update_one({"user_id": user_id}, {"$inc": {"laudacoin": -total_price}})
     
-    # Add item to player's inventory
+    # Add the item to `lundmate_inventory`
+    new_inventory_item = {
+        "user_id": user_id,
+        "item_name": item_name,
+        "quantity": quantity,
+        "purchased_at": message.date  # Timestamp for purchase
+    }
+
+    await lundmate_inventory.insert_one(new_inventory_item)
+
+    # Optionally, add the item reference to player's inventory array in `lundmate_players`
     inventory = player.get("inventory", [])
     inventory.append({"item_name": item_name, "quantity": quantity})
     await lundmate_players.update_one({"user_id": user_id}, {"$set": {"inventory": inventory}})
