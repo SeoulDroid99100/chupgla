@@ -11,3 +11,4 @@ python-dotenv
 cachetools 
 psutil
 nest_asyncio
+flask
