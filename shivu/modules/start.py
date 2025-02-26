@@ -44,5 +44,3 @@ async def start(client, message):
     photo_url = random.choice(PHOTO_URL)
 
     await client.send_photo(chat_id=message.chat.id, photo=photo_url, caption=caption, reply_markup=reply_markup, parse_mode='markdown')
-
-shivuu.run()
