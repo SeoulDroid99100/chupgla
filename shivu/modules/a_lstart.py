@@ -1,6 +1,6 @@
 from pyrogram import filters
 from pyrogram.types import Message
-from shivuu import shivuu, lundmate_players
+from shivu import shivuu, lundmate_players
 
 @shivuu.on_message(filters.command("lstart") & filters.private)
 async def start_game(client, message: Message):
