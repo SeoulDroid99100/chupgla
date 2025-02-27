@@ -20,27 +20,27 @@ LEAGUES = [
 TRAINING_MODES = {
     "foundation": {
         "name": "🏋️♂️ Foundation Training",
-        "cost": 100,
+        "cost": 10,
         "gain": (0.1, 0.3),
         "xp": (5, 10),
         "cooldown": 300,
-        "strain": 10
+        "strain": 00
     },
     "power": {
         "name": "💥 Power Session",
-        "cost": 250,
+        "cost": 25,
         "gain": (0.25, 0.8),
         "xp": (15, 25),
-        "cooldown": 600,
-        "strain": 20
+        "cooldown": 300,
+        "strain": 0
     },
     "elite": {
         "name": "🚀 Elite Conditioning",
-        "cost": 500,
+        "cost": 50,
         "gain": (0.5, 1.0),
         "xp": (30, 50),
-        "cooldown": 1800,
-        "strain": 40
+        "cooldown": 300,
+        "strain": 0
     }
 }
 
@@ -166,8 +166,6 @@ async def process_training(client, callback):
         f"▸ {next_milestone}",
         random.choice([
             "💡 Tip: Consistent training yields compounding gains!",
-            "⚡ Energy Management: Allow 8h endurance recovery",
-            "🏆 Leaderboard: Top 15% this week!"
         ])
     ]
 
