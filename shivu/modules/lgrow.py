@@ -121,4 +121,4 @@ async def boost_callback(client, callback_query):
     await callback_query.answer("🔥 Boosting feature coming soon!", show_alert=True)
 
 # 🔥 Start Decay Loop
-shivuu.create_task(apply_decay())
+shivuu.loop.create_task(apply_decay())
