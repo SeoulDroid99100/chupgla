@@ -13,8 +13,10 @@ async def register_player(client: shivuu, message: Message):
     user = message.from_user
     user_id = user.id
     
-    # Database Check
-    if await xy.find_one({str(user_id): {"$exists": True}}):  # Check if the user already exists
+    # Database Check: Fetch the user data
+    existing_user = await xy.find_one({"user_id": user_id})
+    
+    if existing_user:  # Check if the user already exists
         await message.reply("❗ You already have an active account!")
         return
 
@@ -91,7 +93,7 @@ async def register_player(client: shivuu, message: Message):
     }
 
     # Insert the document with `user_id` as the key for the document.
-    await xy.insert_one({str(user_id): player_doc})
+    await xy.insert_one({"user_id": user_id, **player_doc})
 
     # Send formatted response
     response = f"""
