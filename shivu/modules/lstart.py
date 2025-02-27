@@ -38,5 +38,5 @@ async def start_game(client, message):
         f"🔥 You have been inducted as a **Grunt 🌱**, the first step towards **Godhood.**\n\n"
         f"🌱 **Your Lund begins at:** **1.0 cm**\n"
         f"💎 **Your first reward:** {reward}\n\n"
-        f"⚔️ **Don’t fall behind. Start training NOW! Type /ltrain!**"
+        f"⚔️ **Don’t fall behind. Start training NOW! Type /lgrow!**"
     )
