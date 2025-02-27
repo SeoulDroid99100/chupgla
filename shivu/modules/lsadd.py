@@ -3,8 +3,9 @@ from shivu import shivuu, lundmate_players
 from pyrogram import filters
 
 # Dynamic Imports
-lsadmin = importlib.import_module("lsadmin")
-o1 = importlib.import_module("o1")  # Fetch leagues from o1
+# Dynamic Imports
+lsadmin = importlib.import_module("shivu.modules.lsadmin")
+o1 = importlib.import_module("shivu.modules.o1")  # Fetch leagues from o1 # Fetch leagues from o1
 
 # 🔄 Predefined Values
 RARITY_LEVELS = ["Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythical"]
