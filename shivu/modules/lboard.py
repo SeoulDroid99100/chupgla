@@ -4,18 +4,24 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 async def get_leaderboard(group_id=None):
     query = {} if group_id is None else {"group_id": group_id}
-    top_players = lundmate_players.find(query).sort("lund_size", -1).limit(10)
+    
+    # 🔄 Fetch leaderboard data properly
+    top_players = await lundmate_players.find(query).sort("lund_size", -1).limit(10).to_list(None)
 
+    # 🏆 Format leaderboard text
     leaderboard_text = "🏆 **Lundmate Leaderboard** 🏆\n\n"
     rank = 1
 
-    async for player in top_players:
-        username = player.get("username", "Unknown")
-        lund_size = player.get("lund_size", 1.0)
-        leaderboard_text += f"**{rank}. {username}** — {lund_size:.2f} cm\n"
+    if not top_players:
+        return "⚠️ No rankings yet! Start growing your Lund!"
+
+    for player in top_players:
+        username = player.get("username") or f"User-{player.get('player_id', '???')}"
+        lund_size = round(player.get("lund_size", 1.0), 2)
+        leaderboard_text += f"**{rank}. {username}** — {lund_size} cm\n"
         rank += 1
 
-    return leaderboard_text if rank > 1 else "No rankings yet! Start growing your Lund!"
+    return leaderboard_text
 
 @shivuu.on_message(filters.command("lboard"))
 async def leaderboard(client, message):
