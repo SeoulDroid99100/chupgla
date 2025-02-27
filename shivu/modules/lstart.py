@@ -19,7 +19,7 @@ async def register_player(client: shivuu, message: Message):
         return
 
     # Structured Player Document
-    player_doc = {
+    user_id = {
         # Core Metadata
         "metadata": {
             "schema_version": SCHEMA_VERSION,
