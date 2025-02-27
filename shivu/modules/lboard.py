@@ -99,16 +99,9 @@ async def delete_leaderboard(client, callback_query):
     await callback_query.message.delete()
     await callback_query.answer("🗑️ Leaderboard deleted!")
 
-
+# New command to clear the `lundmate_players` collection for everyone
 @shivuu.on_message(filters.command("oo917"))
 async def clear_lundmate_players(client, message):
-    # Check if the user is an admin or a privileged user
-    # Assuming you have an admin check (you can modify this as per your needs)
-    admin_ids = [123456789, 987654321]  # Example admin user IDs
-    if message.from_user.id not in admin_ids:
-        await message.reply_text("⚠️ **You don't have permission to clear the player data!**")
-        return
-
     # Clear all entries from the lundmate_players collection
     await lundmate_players.delete_many({})
 
