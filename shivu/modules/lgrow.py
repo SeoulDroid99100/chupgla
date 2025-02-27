@@ -1,16 +1,50 @@
 from shivu import shivuu, lundmate_players
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-import random, time
+import random, time, asyncio
 
-# 🚀 Growth Mechanics
+# 🚀 Growth Constants
 BASE_GROWTH = 0.5  
 BONUS_CHANCE = 5  
-DECAY_LOSS = 2.0  
+DECAY_THRESHOLD = 8 * 3600  # 8 hours
+INITIAL_DECAY = 2.0  
 GROW_COOLDOWN = 300  
 
+# ⏳ Cooldown & Decay Tracking
 user_cooldowns = {}  
+user_last_growth = {}
 
+# 📌 Auto Decay System (Runs Every Hour)
+async def apply_decay():
+    while True:
+        current_time = time.time()
+        users = await lundmate_players.find({}).to_list(None)
+
+        for user in users:
+            user_id = user["user_id"]
+            last_grow_time = user_last_growth.get(user_id, user.get("last_grow", current_time))
+            
+            # ⏳ If inactive for 8+ hours, start decay
+            if current_time - last_grow_time >= DECAY_THRESHOLD:
+                decay_amount = INITIAL_DECAY * (2 ** ((current_time - last_grow_time - DECAY_THRESHOLD) // 3600))
+                new_size = max(1.0, round(user["lund_size"] - decay_amount, 2))  # Prevent negative sizes
+                
+                await lundmate_players.update_one(
+                    {"user_id": user_id},
+                    {"$set": {"lund_size": new_size, "last_grow": last_grow_time}}
+                )
+                
+                # 🚨 Send decay warning
+                try:
+                    await shivuu.send_message(user_id, f"⚠️ **Your Lund is shrinking!**\n"
+                                                       f"📉 **-{decay_amount:.2f} cm** due to inactivity.\n"
+                                                       f"🔥 **Use /lgrow to stop the decay!**")
+                except:
+                    pass  # Ignore errors if user can't receive messages
+        
+        await asyncio.sleep(3600)  # Run every hour
+
+# 🚀 Lund Growth Command
 @shivuu.on_message(filters.command("lgrow"))
 async def grow_lund(client, message):
     user_id = message.from_user.id
@@ -37,8 +71,11 @@ async def grow_lund(client, message):
         lucky_boost = True
 
     new_size = round(user_data["lund_size"] + growth, 2)
-    await lundmate_players.update_one({"user_id": user_id}, {"$set": {"lund_size": new_size}})
-    user_cooldowns[user_id] = time_now  
+    await lundmate_players.update_one({"user_id": user_id}, {"$set": {"lund_size": new_size, "last_grow": time_now}})
+    
+    # 🕒 Update cooldown & last grow time
+    user_cooldowns[user_id] = time_now
+    user_last_growth[user_id] = time_now  
 
     # 📲 Inline Buttons
     buttons = InlineKeyboardMarkup([
@@ -57,6 +94,7 @@ async def grow_lund(client, message):
         reply_markup=buttons
     )
 
+# 🛠️ Inline Callbacks
 @shivuu.on_callback_query(filters.regex(r"train_(\d+)"))
 async def train_callback(client, callback_query):
     user_id = int(callback_query.data.split("_")[1])
@@ -80,3 +118,6 @@ async def boost_callback(client, callback_query):
         await callback_query.answer("⚠️ Not your button!", show_alert=True)
         return
     await callback_query.answer("🔥 Boosting feature coming soon!", show_alert=True)
+
+# 🔥 Start Decay Loop
+asyncio.create_task(apply_decay())
