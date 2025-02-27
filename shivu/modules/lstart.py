@@ -14,12 +14,12 @@ async def register_player(client: shivuu, message: Message):
     user_id = user.id
     
     # Database Check
-    if await xy.find_one({"user_id": user_id}):
+    if await xy.find_one({str(user_id): {"$exists": True}}):  # Check if the user already exists
         await message.reply("❗ You already have an active account!")
         return
 
     # Structured Player Document
-    user_id = {
+    player_doc = {
         # Core Metadata
         "metadata": {
             "schema_version": SCHEMA_VERSION,
@@ -90,9 +90,9 @@ async def register_player(client: shivuu, message: Message):
         }
     }
 
-    # Insert into database
-    await xy.insert_one(player_doc)
-    
+    # Insert the document with `user_id` as the key for the document.
+    await xy.insert_one({str(user_id): player_doc})
+
     # Send formatted response
     response = f"""
 🎉 **Welcome {user.first_name} to Lundmate UX!**
