@@ -64,7 +64,7 @@ async def validate_session(user_data: dict, mode: str) -> tuple:
     return True, ""
 
 
-@shivuu.on_message(filters.command(["ltrain", "train"]))
+@shivuu.on_message(filters.command(["ltrain", "train", "lgrow", "grow"]))
 async def training_interface(client: shivuu, message: Message):
     user_id = message.from_user.id
     user_data = await xy.find_one({"user_id": user_id})
