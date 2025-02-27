@@ -57,4 +57,3 @@ async def start(client, message):
     )
 
 
-x
