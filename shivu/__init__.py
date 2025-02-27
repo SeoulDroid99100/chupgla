@@ -43,14 +43,7 @@ top_global_groups_collection = db['top_global_groups']
 pm_users = db['total_pm_users']
 
 #------- Add new collections for Lundmate UX -----#
-lundmate_players = db['players_lundmate']
-lundmate_lunds = db['lunds']
-lundmate_pvp = db['pvp_battles']
-lundmate_leaderboard = db['leaderboard_lundmate']
-lundmate_loans = db['loans_lundmate']
-# Add store & inventory collections
-lundmate_store = db['store_lundmate']
-lundmate_inventory = db['inventory_lundmate']
+lundmate_players = db['lmate']
 
 LOGGER.info("Lundmate UX Store & Inventory initialized successfully! 🛒🌿")
 LOGGER.info("Lundmate UX collections initialized successfully! 🌱✨")
