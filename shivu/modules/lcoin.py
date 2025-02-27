@@ -133,7 +133,30 @@ async def coin_handler(client: shivuu, message: Message):
 @shivuu.on_callback_query(filters.regex(r"^coin_(balance|history)$"))
 async def handle_coin_buttons(client, callback):
     action = callback.matches[0].group(1)
+    user_id = callback.from_user.id
+    user_data = await xy.find_one({"user_id": user_id})
+    
     if action == "balance":
-      pass# ... balance check logic similar to command handler ...
+        response = (
+            f"💰 **Your Balance**\n\n"
+            f"Wallet: {user_data['economy']['wallet']:.1f} LC\n"
+            f"Bank: {user_data['economy']['bank']:.1f} LC\n"
+            f"Total: {user_data['economy']['wallet'] + user_data['economy']['bank']:.1f} LC"
+        )
+        await callback.message.edit_text(response)
+    
     elif action == "history":
-      pass# ... history display logic ...
+        transactions = user_data["economy"].get("transaction_log", [])[-10:]
+        
+        response = ["📜 **Transaction History**\n"]
+        for tx in reversed(transactions):
+            date = tx["timestamp"].strftime("%m/%d %H:%M")
+            direction = "Sent" if tx["sender"] == user_id else "Received"
+            counterpart = tx["recipient"] if direction == "Sent" else tx["sender"]
+            
+            response.append(
+                f"{date} {direction} {tx['amount']:.1f}LC "
+                f"to/from {counterpart}"
+            )
+        
+        await callback.message.edit_text("\n".join(response))
