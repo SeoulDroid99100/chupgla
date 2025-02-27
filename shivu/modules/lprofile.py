@@ -1,85 +1,95 @@
 from shivu import shivuu, xy
 from pyrogram import filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import Message
+from datetime import datetime
 
-# Helper function to get player rank (dummy for now)
-def get_player_rank(user_id):
-    # For now, returning a placeholder value. Later, we will connect it to the leaderboard.
-    return "Tyrant 🛡️"
+# League configuration (same as in lstart.py)
+LEAGUES = [
+    {"min": 1.0, "max": 5.0, "name": "Grunt 🌱"},
+    {"min": 5.1, "max": 10.0, "name": "Brute 🏗️"},
+    {"min": 10.1, "max": 20.0, "name": "Savage ⚔️"},
+    {"min": 20.1, "max": 35.0, "name": "Warlord 🐺"},
+    {"min": 35.1, "max": 50.0, "name": "Overlord 👑"},
+    {"min": 50.1, "max": 75.0, "name": "Tyrant 🛡️"},
+    {"min": 75.1, "max": 100.0, "name": "Behemoth 💎"},
+    {"min": 100.1, "max": 150.0, "name": "Colossus 🔥"},
+    {"min": 150.1, "max": float('inf'), "name": "Godhand ✨"}
+]
+
+def get_league_progress(current_size):
+    for league in LEAGUES:
+        if league["min"] <= current_size <= league["max"]:
+            next_threshold = league["max"] + 0.1
+            progress = (current_size - league["min"]) / (league["max"] - league["min"]) * 100
+            return league["name"], progress, next_threshold
+    return "Unknown", 0, 0
+
+def create_progress_bar(percentage):
+    filled = '█' * int(percentage / 5)
+    empty = '░' * (20 - len(filled))
+    return f"{filled}{empty} {percentage:.1f}%"
 
 @shivuu.on_message(filters.command("lprofile"))
-async def view_profile(client, message):
-    """Handles viewing player profile, including Lund Size, League, Laudacoin, etc."""
+async def profile_handler(client: shivuu, message: Message):
     user_id = message.from_user.id
-    user_data = await xy.find_one({"player_id": user_id})
-
+    user_data = await xy.find_one({"user_id": user_id})
+    
     if not user_data:
-        await message.reply_text("⚠️ You need to register first with /lstart.")
+        await message.reply("❌ Account not found! Use /lstart to register.")
         return
 
-    # Collect player data
-    first_name = message.from_user.first_name
-    lund_size = user_data.get('lund_size', 1.0)
-    league = user_data.get('league', 'Grunt 🌱')
-    laudacoin = user_data.get('laudacoin', 0)
-    avatar = user_data.get('avatar', '🐉')
-    progress = user_data.get('progress', 0)
+    # Extract core information
+    economy = user_data.get("economy", {})
+    progression = user_data.get("progression", {})
+    combat = user_data.get("combat_stats", {})
+    inventory = user_data.get("inventory", {})
 
-    # Get player's rank
-    player_rank = get_player_rank(user_id)
+    # Calculate league progress
+    current_size = progression.get("lund_size", 1.0)
+    league_name, progress_percent, next_threshold = get_league_progress(current_size)
+    
+    # Format financial information
+    wallet = economy.get("wallet", 0)
+    bank = economy.get("bank", 0)
+    
+    # Format combat stats
+    pvp_wins = combat.get("pvp", {}).get("wins", 0)
+    pvp_losses = combat.get("pvp", {}).get("losses", 0)
+    win_rate = (pvp_wins / (pvp_wins + pvp_losses)) * 100 if (pvp_wins + pvp_losses) > 0 else 0
+    
+    # Format inventory
+    items_count = len(inventory.get("items", []))
+    equipped_items = sum(1 for slot in inventory.get("equipment", {}).get("slots", {}).values() if slot)
 
-    # Compose profile text
-    profile_text = f"""
-    📜 **{first_name}'s Profile**:
-    🐉 **Avatar**: {avatar}
-    📏 **Lund Size**: {lund_size} cm
-    🏆 **League**: {league}
-    💰 **Laudacoin**: {laudacoin}
-    🎯 **Progress**: {progress}%
-    📊 **Rank**: {player_rank}
-    """
+    # Create progress visualizations
+    size_progress = create_progress_bar(progress_percent)
+    level_progress = create_progress_bar(
+        (progression.get("experience", 0) % 1000) / 10
+    )  # Assuming 1000 XP per level
 
-    # Create inline buttons
-    buttons = [
-        [InlineKeyboardButton("🎯 Check Goal Progress", callback_data="check_goal_progress")],
-        [InlineKeyboardButton("🎁 Claim Daily Bonus", callback_data="claim_daily_bonus")],
-        [InlineKeyboardButton("🔧 Manage Inventory", callback_data="manage_inventory")],
-        [InlineKeyboardButton("🏅 View Leaderboard", callback_data="view_leaderboard")]
-    ]
+    response = f"""
+🏆 **{user_data['user_info'].get('first_name', 'Player')}'s Profile**
 
-    # Send profile details with buttons
-    await message.reply_text(profile_text, reply_markup=InlineKeyboardMarkup(buttons))
+▫️ **League Status**: {league_name}
+▫️ **Lund Size**: {current_size:.1f}cm → Next: {next_threshold:.1f}cm
+{size_progress}
 
-# Callback handler for 'Check Goal Progress'
-@shivuu.on_callback_query(filters.regex("check_goal_progress"))
-async def goal_progress(client, callback_query):
-    # Display goal progress (dummy for now)
-    await callback_query.answer("🎯 You’ve grown by 2.3 cm! Keep pushing to the next level.")
+▫️ **Level**: {progression.get('level', 1)} 
+{level_progress}
 
-# Callback handler for 'Claim Daily Bonus'
-@shivuu.on_callback_query(filters.regex("claim_daily_bonus"))
-async def claim_daily_bonus(client, callback_query):
-    # Add daily bonus (dummy for now)
-    daily_bonus = 10
-    user_id = callback_query.from_user.id
-    await xy.update_one({"player_id": user_id}, {"$inc": {"laudacoin": daily_bonus}})
-    await callback_query.answer(f"🎁 You’ve claimed your daily bonus of {daily_bonus} Laudacoin!")
+💰 **Economy**
+├─ Wallet: {wallet:.1f} LC
+└─ Bank: {bank:.1f} LC
 
-# Callback handler for 'Manage Inventory'
-@shivuu.on_callback_query(filters.regex("manage_inventory"))
-async def manage_inventory(client, callback_query):
-    """Display inventory items and quantities."""
-    user_id = callback_query.from_user.id
-    user_data = await xy.find_one({"player_id": user_id})
+⚔️ **Combat**
+├─ PvP: {pvp_wins}W/{pvp_losses}L ({win_rate:.1f}%)
+└─ Rating: {combat.get('rating', 1000)}
 
-    # Show the inventory items (dummy data for now)
-    inventory = user_data.get('inventory', {})
-    inventory_text = "🛒 **Your Inventory**:\n"
+🎒 **Inventory**
+├─ Items: {items_count}/{inventory.get('storage_capacity', 50)}
+└─ Equipped: {equipped_items} items
 
-    if not inventory:
-        inventory_text += "No items in your inventory. Try to earn some!"
-    else:
-        for item, count in inventory.items():
-            inventory_text += f"{item}: {count} 📦\n"
+📅 Member since: {user_data['metadata']['creation_date'].strftime('%Y-%m-%d')}
+"""
 
-    await callback_query.message.edit_text(inventory_text, reply_markup=callback_query.message.reply_markup)
+    await message.reply(response.strip())
