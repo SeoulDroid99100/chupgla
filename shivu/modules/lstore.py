@@ -1,6 +1,6 @@
 from pyrogram import filters
 from shivu import shivuu
-from shivu.database import lundmate_players
+from shivu import lundmate_players
 from lsadmin import is_admin  # Import admin verification
 
 @shivuu.on_message(filters.command("ladditem"))
