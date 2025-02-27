@@ -4,8 +4,8 @@ from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # Dynamic Imports
-lsadmin = importlib.import_module("lsadmin")
-o1 = importlib.import_module("o1")
+lsadmin = importlib.import_module("shivu.modules.lsadmin")
+o1 = importlib.import_module("shivu.modules.o1")
 
 ITEMS_PER_PAGE = 5  # Items per store page
 
