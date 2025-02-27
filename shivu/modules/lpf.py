@@ -1,11 +1,17 @@
-from shivu import shivuu, o1, lboard, lstore
+import importlib
+from shivu import shivuu
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-@shivuu.on_message(filters.command("lprofile"))
+# Dynamically import modules
+o1 = importlib.import_module("shivu.modules.o1")
+lboard = importlib.import_module("shivu.modules.lboard")
+lstore = importlib.import_module("shivu.modules.lstore")
+
+@shivuu.on_message(filters.command("lpf"))
 async def profile(client, message):
     user_id = message.from_user.id
-    user_data = await o1(user_id)
+    user_data = await o1.get_player_data(user_id)
 
     if not user_data:
         await message.reply_text("⚠️ **You haven't started yet!** Use /lstart first.")
