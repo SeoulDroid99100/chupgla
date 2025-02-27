@@ -1,67 +1,139 @@
 from shivu import shivuu, xy
 from pyrogram import filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from datetime import datetime
+
+async def log_transaction(sender_id: int, recipient_id: int, amount: float, status: str):
+    transaction = {
+        "timestamp": datetime.utcnow(),
+        "sender": sender_id,
+        "recipient": recipient_id,
+        "amount": amount,
+        "status": status
+    }
+    
+    # Update both sender and recipient records
+    await xy.update_one(
+        {"user_id": sender_id},
+        {"$push": {"economy.transaction_log": transaction}}
+    )
+    await xy.update_one(
+        {"user_id": recipient_id},
+        {"$push": {"economy.transaction_log": transaction}}
+    )
 
 @shivuu.on_message(filters.command("lcoin"))
-async def check_balance(client, message):
-    """Check the user's Laudacoin balance."""
-    user_id = message.from_user.id
-    user_data = await xy.find_one({"player_id": user_id})
-
-    if not user_data:
-        await message.reply_text("❗ You need to register first using /lstart.")
-        return
-
-    laudacoin_balance = user_data.get("laudacoin", 0)
-    await message.reply_text(f"💰 **Your Laudacoin Balance**: {laudacoin_balance} 💸\n\nUse /ltransfer to send Laudacoin to others.")
-
-@shivuu.on_message(filters.command("ltransfer"))
-async def transfer_coins(client, message):
-    """Send Laudacoin to another user."""
-    # Split the command into recipient and amount
-    parts = message.text.split()
+async def coin_handler(client: shivuu, message: Message):
+    args = message.command[1:]
     
-    if len(parts) != 3:
-        await message.reply_text("⚠️ Usage: /ltransfer <user_id> <amount>")
+    if not args:
+        # Show main coin menu
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("💰 Balance", callback_data="coin_balance"),
+             InlineKeyboardButton("📜 History", callback_data="coin_history")],
+            [InlineKeyboardButton("💸 Send Coins", switch_inline_query_current_chat="send ")]
+        ])
+        
+        await message.reply(
+            "🏦 **Laudacoin Banking System**\n\n"
+            "Choose an option:",
+            reply_markup=buttons
+        )
         return
 
-    recipient_id = int(parts[1])
-    amount = int(parts[2])
+    # Handle subcommands
+    if args[0] == "balance":
+        user_id = message.from_user.id
+        user_data = await xy.find_one({"user_id": user_id})
+        
+        response = (
+            f"💰 **Your Balance**\n\n"
+            f"Wallet: {user_data['economy']['wallet']:.1f} LC\n"
+            f"Bank: {user_data['economy']['bank']:.1f} LC\n"
+            f"Total: {user_data['economy']['wallet'] + user_data['economy']['bank']:.1f} LC"
+        )
+        await message.reply(response)
 
-    user_id = message.from_user.id
-    sender_data = await xy.find_one({"player_id": user_id})
-    recipient_data = await xy.find_one({"player_id": recipient_id})
+    elif args[0] == "send":
+        if len(args) < 3:
+            await message.reply("❌ Usage: /lcoin send @username amount")
+            return
 
-    if not sender_data:
-        await message.reply_text("❗ You need to register first using /lstart.")
-        return
+        try:
+            amount = float(args[2])
+            if amount <= 0:
+                raise ValueError
+        except:
+            await message.reply("❌ Invalid amount!")
+            return
 
-    if not recipient_data:
-        await message.reply_text("❗ Recipient not found. Ensure they have registered first.")
-        return
+        sender_id = message.from_user.id
+        sender_data = await xy.find_one({"user_id": sender_id})
+        
+        # Resolve recipient
+        try:
+            recipient = await client.get_users(args[1])
+            recipient_id = recipient.id
+        except:
+            await message.reply("❌ User not found!")
+            return
 
-    sender_balance = sender_data.get("laudacoin", 0)
+        if sender_id == recipient_id:
+            await message.reply("❌ Cannot send to yourself!")
+            return
 
-    if sender_balance < amount:
-        await message.reply_text("❌ You don't have enough Laudacoin to make this transfer.")
-        return
+        # Check sender balance
+        if sender_data["economy"]["wallet"] < amount:
+            await message.reply("❌ Insufficient funds in wallet!")
+            return
 
-    # Deduct coins from the sender and add them to the recipient
-    await xy.update_one({"player_id": user_id}, {"$inc": {"laudacoin": -amount}})
-    await xy.update_one({"player_id": recipient_id}, {"$inc": {"laudacoin": amount}})
+        # Perform transfer
+        async with await client.db.client.start_session() as session:
+            async with session.start_transaction():
+                # Deduct from sender
+                await xy.update_one(
+                    {"user_id": sender_id},
+                    {"$inc": {"economy.wallet": -amount}},
+                    session=session
+                )
+                
+                # Add to recipient
+                await xy.update_one(
+                    {"user_id": recipient_id},
+                    {"$inc": {"economy.wallet": amount}},
+                    session=session
+                )
+                
+                # Log transaction
+                await log_transaction(sender_id, recipient_id, amount, "completed")
 
-    # Confirm the transaction
-    await message.reply_text(f"🎉 You’ve successfully sent {amount} Laudacoin to <@{recipient_id}>.")
+        await message.reply(
+            f"✅ Successfully sent {amount:.1f} LC to {recipient.first_name}!\n"
+            f"New balance: {sender_data['economy']['wallet'] - amount:.1f} LC"
+        )
 
-@shivuu.on_message(filters.command("ltransferhistory"))
-async def transfer_history(client, message):
-    """Shows the user's past transactions (dummy for now)."""
-    user_id = message.from_user.id
-    user_data = await xy.find_one({"player_id": user_id})
+    elif args[0] == "history":
+        user_id = message.from_user.id
+        user_data = await xy.find_one({"user_id": user_id})
+        transactions = user_data["economy"].get("transaction_log", [])[-10:]
+        
+        response = ["📜 **Transaction History**\n"]
+        for tx in reversed(transactions):
+            date = tx["timestamp"].strftime("%m/%d %H:%M")
+            direction = "Sent" if tx["sender"] == user_id else "Received"
+            counterpart = tx["recipient"] if direction == "Sent" else tx["sender"]
+            
+            response.append(
+                f"{date} {direction} {tx['amount']:.1f}LC "
+                f"to/from {counterpart}"
+            )
+        
+        await message.reply("\n".join(response))
 
-    if not user_data:
-        await message.reply_text("❗ You need to register first using /lstart.")
-        return
-
-    # Here, we would normally show a history of transactions (dummy for now)
-    await message.reply_text("🕒 **Transaction History (dummy)**:\n\n1. Sent 20 Laudacoin to <@123456789>\n2. Received 50 Laudacoin from <@987654321>")￼Enter
+@shivuu.on_callback_query(filters.regex(r"^coin_(balance|history)$"))
+async def handle_coin_buttons(client, callback):
+    action = callback.matches[0].group(1)
+    if action == "balance":
+        # ... balance check logic similar to command handler ...
+    elif action == "history":
+        # ... history display logic ...
