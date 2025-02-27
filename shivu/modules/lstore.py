@@ -1,26 +1,90 @@
+import importlib
+from shivu import shivuu, lundmate_players
 from pyrogram import filters
-from shivu import shivuu
-from shivu import lundmate_players
-from lsadmin import is_admin  # Import admin verification
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-@shivuu.on_message(filters.command("ladditem"))
-async def add_item(_, message):
-    """Admin-only: Add a new item to the store."""
+# Dynamic Imports
+lsadmin = importlib.import_module("lsadmin")
+o1 = importlib.import_module("o1")
+
+ITEMS_PER_PAGE = 5  # Items per store page
+
+# 🛒 **Store Command with Pagination**
+@shivuu.on_message(filters.command("lstore"))
+async def show_store(client, message):
+    await send_store_page(message.chat.id, page=0)
+
+# 📄 **Paginated Store View**
+async def send_store_page(chat_id, page=0):
+    store_items = await lundmate_players.find({"type": "store"}).to_list(length=100)
+
+    if not store_items:
+        await shivuu.send_message(chat_id, "🛒 **Store is empty!** Admins need to add items.")
+        return
+
+    start = page * ITEMS_PER_PAGE
+    end = start + ITEMS_PER_PAGE
+    paginated_items = store_items[start:end]
+
+    store_text = f"🛍️ **Store - Page {page+1}**\n\n"
+    buttons = []
+
+    for item in paginated_items:
+        store_text += (
+            f"🔹 **{item['name']}**\n"
+            f"💰 **{item['price']} Laudacoin**\n"
+            f"🏆 League: {item['league_access']}\n"
+            f"📦 Stock: {'Unlimited' if item['stock'] == -1 else item['stock']}\n"
+            f"───────────────\n"
+        )
+        buttons.append([InlineKeyboardButton(f"🛍️ Buy {item['name']}", callback_data=f"buy_{item['name']}")])
+
+    nav_buttons = []
+    if start > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"store_page_{page-1}"))
+    if end < len(store_items):
+        nav_buttons.append(InlineKeyboardButton("➡️ Next", callback_data=f"store_page_{page+1}"))
+
+    buttons.append(nav_buttons)
+    buttons.append([InlineKeyboardButton("🔄 Refresh", callback_data="refresh_store")])
+    
+    await shivuu.send_message(chat_id, store_text, reply_markup=InlineKeyboardMarkup(buttons))
+
+# 📄 **Pagination Handling**
+@shivuu.on_callback_query(filters.regex(r"store_page_(\d+)"))
+async def store_page_callback(client, callback_query):
+    page = int(callback_query.data.split("_")[2])
+    await callback_query.message.delete()
+    await send_store_page(callback_query.message.chat.id, page)
+
+# 🔄 **Refresh Store Button**
+@shivuu.on_callback_query(filters.regex("refresh_store"))
+async def refresh_store_callback(client, callback_query):
+    await callback_query.message.delete()
+    await send_store_page(callback_query.message.chat.id, page=0)
+
+# 🛒 **Admin: Add Store Item**
+@shivuu.on_message(filters.command("laddstore"))
+async def add_store_item(client, message):
     user_id = message.from_user.id
-    if not await is_admin(user_id):
-        return await message.reply("❌ You are not authorized to add store items!")
 
-    args = message.text.split("|")
-    if len(args) < 10:
-        return await message.reply("⚠️ Incorrect format!\nUsage: `/ladditem name | description | price | rarity | category | effect | stock | duration | usable | league_access`")
+    if not await lsadmin.is_admin(user_id):
+        await message.reply_text("⛔ You don’t have permission to add items!")
+        return
 
-    name, description, price, rarity, category, effect, stock, duration, usable, league_access = map(str.strip, args[1:])
+    params = message.text.split(" ", 10)
+    if len(params) < 11:
+        await message.reply_text("⚠️ **Usage:** /laddstore <name> <desc> <price> <rarity> <category> <effect> <stock> <duration> <usable> <league>")
+        return
+
+    _, name, desc, price, rarity, category, effect, stock, duration, usable, league = params
     price, stock, duration = int(price), int(stock), int(duration)
-    usable = usable.lower() in ["true", "yes", "1"]
+    usable = usable.lower() == "true"
 
-    item_data = {
+    item = {
+        "type": "store",
         "name": name,
-        "description": description,
+        "description": desc,
         "price": price,
         "rarity": rarity,
         "category": category,
@@ -28,69 +92,36 @@ async def add_item(_, message):
         "stock": stock,
         "duration": duration,
         "usable": usable,
-        "league_access": league_access
+        "league_access": league
     }
 
-    await lundmate_players.update_one({"type": "store"}, {"$push": {"items": item_data}}, upsert=True)
-    await message.reply(f"✅ **{name}** has been added to the store!")
+    await lundmate_players.insert_one(item)
+    await message.reply_text(f"✅ **{name} added to store!**")
 
-@shivuu.on_message(filters.command("lremoveitem"))
-async def remove_item(_, message):
-    """Admin-only: Remove an item from the store."""
+# ❌ **Admin: Remove Store Item**
+@shivuu.on_message(filters.command("lremovestore"))
+async def remove_store_item(client, message):
     user_id = message.from_user.id
-    if not await is_admin(user_id):
-        return await message.reply("❌ You are not authorized to remove store items!")
 
-    if len(message.command) < 2:
-        return await message.reply("⚠️ Usage: `/lremoveitem item_name`")
+    if not await lsadmin.is_admin(user_id):
+        await message.reply_text("⛔ You don’t have permission to remove items!")
+        return
 
-    item_name = message.text.split(" ", 1)[1].strip()
-    result = await lundmate_players.update_one({"type": "store"}, {"$pull": {"items": {"name": item_name}}})
+    params = message.text.split(" ", 1)
+    if len(params) < 2:
+        await message.reply_text("⚠️ **Usage:** /lremovestore <item_name>")
+        return
 
-    if result.modified_count > 0:
-        await message.reply(f"✅ **{item_name}** has been removed from the store!")
+    item_name = params[1]
+    result = await lundmate_players.delete_one({"type": "store", "name": item_name})
+
+    if result.deleted_count:
+        await message.reply_text(f"🗑️ **{item_name} removed from store!**")
     else:
-        await message.reply("❌ Item not found in the store!")
+        await message.reply_text("⚠️ Item not found!")
 
-@shivuu.on_message(filters.command("lstore"))
-async def list_store(_, message):
-    """List available store items."""
-    store_data = await lundmate_players.find_one({"type": "store"})
-    if not store_data or "items" not in store_data or not store_data["items"]:
-        return await message.reply("🛒 The store is currently empty!")
-
-    store_text = "🛍 **Lundmate Store**\n\n"
-    for item in store_data["items"]:
-        store_text += f"**{item['name']}** ({item['rarity'].capitalize()})\n"
-        store_text += f"💰 Price: {item['price']} LC | 🎭 Category: {item['category'].capitalize()}\n"
-        store_text += f"📜 {item['description']}\n"
-        store_text += f"🎖 League Access: {item['league_access']} | 🏷 Stock: {'Unlimited' if item['stock'] == -1 else item['stock']}\n"
-        store_text += "—" * 20 + "\n"
-
-    await message.reply(store_text)
-
-@shivuu.on_message(filters.command("lupdateitem"))
-async def update_item(_, message):
-    """Admin-only: Update an existing store item."""
-    user_id = message.from_user.id
-    if not await is_admin(user_id):
-        return await message.reply("❌ You are not authorized to update store items!")
-
-    args = message.text.split("|")
-    if len(args) < 3:
-        return await message.reply("⚠️ Incorrect format!\nUsage: `/lupdateitem item_name | field | new_value`")
-
-    item_name, field, new_value = map(str.strip, args[1:])
-    
-    # Convert data types as needed
-    if field in ["price", "stock", "duration"]:
-        new_value = int(new_value)
-    elif field == "usable":
-        new_value = new_value.lower() in ["true", "yes", "1"]
-
-    result = await lundmate_players.update_one({"type": "store", "items.name": item_name}, {"$set": {f"items.$.{field}": new_value}})
-
-    if result.modified_count > 0:
-        await message.reply(f"✅ **{item_name}** has been updated ({field}: {new_value})!")
-    else:
-        await message.reply("❌ Item not found or no changes made!")
+# 🛍️ **Callback: Buy Button**
+@shivuu.on_callback_query(filters.regex(r"buy_(.+)"))
+async def buy_item_callback(client, callback_query):
+    await callback_query.answer("🔄 Redirecting to purchase...", show_alert=True)
+    await client.send_message(callback_query.from_user.id, f"🔄 Use /lbuy {callback_query.data.split('_')[1]} to buy.")
