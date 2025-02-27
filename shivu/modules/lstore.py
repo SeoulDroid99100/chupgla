@@ -63,65 +63,58 @@ async def refresh_store_callback(client, callback_query):
     await callback_query.message.delete()
     await send_store_page(callback_query.message.chat.id, page=0)
 
-# 🛒 **Admin: Add Store Item**
-@shivuu.on_message(filters.command("laddstore"))
-async def add_store_item(client, message):
-    user_id = message.from_user.id
-
-    if not await lsadmin.is_admin(user_id):
-        await message.reply_text("⛔ You don’t have permission to add items!")
-        return
-
-    params = message.text.split(" ", 10)
-    if len(params) < 11:
-        await message.reply_text("⚠️ **Usage:** /laddstore <name> <desc> <price> <rarity> <category> <effect> <stock> <duration> <usable> <league>")
-        return
-
-    _, name, desc, price, rarity, category, effect, stock, duration, usable, league = params
-    price, stock, duration = int(price), int(stock), int(duration)
-    usable = usable.lower() == "true"
-
-    item = {
-        "type": "store",
-        "name": name,
-        "description": desc,
-        "price": price,
-        "rarity": rarity,
-        "category": category,
-        "effect": effect,
-        "stock": stock,
-        "duration": duration,
-        "usable": usable,
-        "league_access": league
-    }
-
-    await lundmate_players.insert_one(item)
-    await message.reply_text(f"✅ **{name} added to store!**")
-
-# ❌ **Admin: Remove Store Item**
-@shivuu.on_message(filters.command("lremovestore"))
-async def remove_store_item(client, message):
-    user_id = message.from_user.id
-
-    if not await lsadmin.is_admin(user_id):
-        await message.reply_text("⛔ You don’t have permission to remove items!")
-        return
-
-    params = message.text.split(" ", 1)
-    if len(params) < 2:
-        await message.reply_text("⚠️ **Usage:** /lremovestore <item_name>")
-        return
-
-    item_name = params[1]
-    result = await lundmate_players.delete_one({"type": "store", "name": item_name})
-
-    if result.deleted_count:
-        await message.reply_text(f"🗑️ **{item_name} removed from store!**")
-    else:
-        await message.reply_text("⚠️ Item not found!")
-
 # 🛍️ **Callback: Buy Button**
 @shivuu.on_callback_query(filters.regex(r"buy_(.+)"))
 async def buy_item_callback(client, callback_query):
-    await callback_query.answer("🔄 Redirecting to purchase...", show_alert=True)
-    await client.send_message(callback_query.from_user.id, f"🔄 Use /lbuy {callback_query.data.split('_')[1]} to buy.")
+    user_id = callback_query.from_user.id
+    item_name = callback_query.data.split("_")[1]
+
+    # 🔍 Fetch User Data
+    user_data = await lundmate_players.find_one({"user_id": user_id})
+    if not user_data:
+        await callback_query.answer("⚠️ You haven't started yet! Use /lstart first.", show_alert=True)
+        return
+
+    user_coins = user_data.get("laudacoin", 0)
+    user_lund_size = user_data.get("lund_size", 1.0)
+
+    # 🔍 Fetch Item Data
+    item = await lundmate_players.find_one({"type": "store", "name": item_name})
+    if not item:
+        await callback_query.answer("⚠️ Item not found!", show_alert=True)
+        return
+
+    item_price = item["price"]
+    item_stock = item["stock"]
+    item_required_league = item["league_access"]
+
+    # 🏆 Check if Player Meets League Requirement
+    player_league = await o1.get_league(user_lund_size)  # Use o1 helper function
+
+    if await o1.league_rank(player_league) < await o1.league_rank(item_required_league):
+        await callback_query.answer(f"⛔ You need to be in **{item_required_league}** league to buy this!", show_alert=True)
+        return
+
+    # 💰 Check If User Has Enough Coins
+    if user_coins < item_price:
+        await callback_query.answer("❌ Not enough Laudacoin!", show_alert=True)
+        return
+
+    # 📦 Check Stock
+    if item_stock != -1 and item_stock <= 0:
+        await callback_query.answer("❌ Out of stock!", show_alert=True)
+        return
+
+    # ✅ Process Purchase
+    await lundmate_players.update_one({"user_id": user_id}, {"$inc": {"laudacoin": -item_price}})
+    
+    if item_stock != -1:
+        await lundmate_players.update_one({"type": "store", "name": item_name}, {"$inc": {"stock": -1}})
+
+    await callback_query.answer(f"✅ Purchased {item_name}!", show_alert=True)
+
+    # 🛍️ Confirm Purchase in Chat
+    await client.send_message(user_id, f"🎉 **You bought {item_name} for {item_price} Laudacoin!**")
+
+    # 🔄 Refresh Store After Purchase
+    await send_store_page(callback_query.message.chat.id, page=0)
