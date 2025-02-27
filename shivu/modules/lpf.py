@@ -1,26 +1,30 @@
 import importlib
-from shivu import shivuu
+from shivu import shivuu, lundmate_players
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# Dynamically import modules
-o1 = importlib.import_module("shivu.modules.o1")
+# Dynamically import necessary modules
 lboard = importlib.import_module("shivu.modules.lboard")
 lstore = importlib.import_module("shivu.modules.lstore")
+o1 = importlib.import_module("shivu.modules.o1")
 
 @shivuu.on_message(filters.command("lpf"))
 async def profile(client, message):
     user_id = message.from_user.id
-    user_data = await o1.get_player_data(user_id)
+    
+    # Fetch player data directly from the database (lundmate_players collection)
+    user_data = await lundmate_players.find_one({"user_id": user_id})
 
     if not user_data:
         await message.reply_text("⚠️ **You haven't started yet!** Use /lstart first.")
         return
 
     # 📈 Get Player Stats
-    lund_size = user_data.get("lund_size", 1.0)
-    coins = user_data.get("laudacoin", 0)
-    player_league = user_data.get("league", "Unranked")
+    lund_size = user_data.get("lund_size", 1.0)  # Lund size
+    coins = user_data.get("laudacoin", 0)  # Laudacoin balance
+    
+    # Get player league using o1.get_user_league() function
+    player_league = await o1.get_user_league(user_id)  # Fetch league using o1
 
     # 📲 Inline Buttons
     buttons = InlineKeyboardMarkup([
@@ -40,6 +44,7 @@ async def profile(client, message):
         reply_markup=buttons
     )
 
+# Leaderboard callback
 @shivuu.on_callback_query(filters.regex(r"leaderboard_(\d+)"))
 async def leaderboard_callback(client, callback_query):
     user_id = int(callback_query.data.split("_")[1])
@@ -51,6 +56,7 @@ async def leaderboard_callback(client, callback_query):
     await callback_query.message.edit_text(leaderboard_text)
     await callback_query.answer("📜 Leaderboard updated!")
 
+# Store callback
 @shivuu.on_callback_query(filters.regex(r"store_(\d+)"))
 async def store_callback(client, callback_query):
     user_id = int(callback_query.data.split("_")[1])
@@ -62,6 +68,7 @@ async def store_callback(client, callback_query):
     await callback_query.message.edit_text(store_text)
     await callback_query.answer("🛒 Store updated!")
 
+# PvP callback (place-holder for future expansion)
 @shivuu.on_callback_query(filters.regex(r"pvp_(\d+)"))
 async def pvp_callback(client, callback_query):
     user_id = int(callback_query.data.split("_")[1])
