@@ -31,3 +31,8 @@ async def get_user_league(lund_size):
         if league["min_size"] <= lund_size <= league["max_size"]:
             return league["name"]
     return "Grunt 🌱"
+
+async def get_leagues():
+    """Retrieve all leagues from the database."""
+    leagues_data = await lundmate_players.find_one({"type": "leagues"})
+    return leagues_data["leagues"] if leagues_data else LEAGUES  # Return default if not found
