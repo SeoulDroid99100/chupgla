@@ -15,7 +15,7 @@ TRAINING_TYPES = {
     "intense": {
         "name": "🔥 Intense Session",
         "cost": 250,
-        "gain": (0.25, 0.5),
+        "gain": (0.25, 0.8),
         "cooldown": 600,
         "stamina": 20
     },
@@ -42,7 +42,7 @@ async def can_train(user_data: dict, training_type: str) -> tuple:
     
     return True, ""
 
-@shivuu.on_message(filters.command("ltrain"))
+@shivuu.on_message(filters.command("ltrain" || "lgrow" || "grow"))
 async def training_menu(client: shivuu, message: Message):
     user_id = message.from_user.id
     user_data = await xy.find_one({"user_id": user_id})
