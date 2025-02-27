@@ -2,81 +2,84 @@ from shivu import shivuu, xy
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+# Helper function to get player rank (dummy for now)
+def get_player_rank(user_id):
+    # For now, returning a placeholder value. Later, we will connect it to the leaderboard.
+    return "Tyrant 🛡️"
+
 @shivuu.on_message(filters.command("lprofile"))
 async def view_profile(client, message):
-    """Display player's profile, including Lund size, league, stats, and inventory items."""
+    """Handles viewing player profile, including Lund Size, League, Laudacoin, etc."""
     user_id = message.from_user.id
     user_data = await xy.find_one({"player_id": user_id})
-    first_name = message.from_user.first_name
 
-    # Check if user exists
     if not user_data:
-        await message.reply_text(f"❌ **{first_name}**, it seems like you haven't registered yet. Please start with `/lstart`.")
+        await message.reply_text("⚠️ You need to register first with /lstart.")
         return
 
-    # Get the user's inventory count
-    inventory_items = await xy.find({"player_id": user_id, "inventory": {"$exists": True}})
-    item_count = len(inventory_items)
+    # Collect player data
+    first_name = message.from_user.first_name
+    lund_size = user_data.get('lund_size', 1.0)
+    league = user_data.get('league', 'Grunt 🌱')
+    laudacoin = user_data.get('laudacoin', 0)
+    avatar = user_data.get('avatar', '🐉')
+    progress = user_data.get('progress', 0)
 
-    # Display player profile data
-    profile_text = f"📜 **{first_name}'s Profile**:\n\n"
-    profile_text += f"**Lund Size:** {user_data.get('lund_size', 1.0)} cm\n"
-    profile_text += f"**League:** {user_data.get('league', 'Grunt 🌱')}\n"
-    profile_text += f"**Laudacoin:** {user_data.get('laudacoin', 0)} 💰\n"
-    profile_text += f"**Progress to Next Level:** {user_data.get('progress', 0)}%\n"
-    profile_text += f"**Daily Streak:** {user_data.get('streak', 1)} days\n"
+    # Get player's rank
+    player_rank = get_player_rank(user_id)
 
-    # Inventory section with item count
-    profile_text += f"\n🛍️ **Inventory:** {item_count} items\n"
-    if inventory_items:
-        for item in inventory_items:
-            profile_text += f"- {item['item']} (Acquired: {item['acquired_date']})\n"
-    else:
-        profile_text += "No items acquired yet.\n"
+    # Compose profile text
+    profile_text = f"""
+    📜 **{first_name}'s Profile**:
+    🐉 **Avatar**: {avatar}
+    📏 **Lund Size**: {lund_size} cm
+    🏆 **League**: {league}
+    💰 **Laudacoin**: {laudacoin}
+    🎯 **Progress**: {progress}%
+    📊 **Rank**: {player_rank}
+    """
 
-    # Inline Buttons for further interaction
+    # Create inline buttons
     buttons = [
-        [InlineKeyboardButton("🔄 Refresh Profile", callback_data="refresh_profile")],
         [InlineKeyboardButton("🎯 Check Goal Progress", callback_data="check_goal_progress")],
-        [InlineKeyboardButton("🎲 Roll for Random Reward", callback_data="roll_reward")]
+        [InlineKeyboardButton("🎁 Claim Daily Bonus", callback_data="claim_daily_bonus")],
+        [InlineKeyboardButton("🔧 Manage Inventory", callback_data="manage_inventory")],
+        [InlineKeyboardButton("🏅 View Leaderboard", callback_data="view_leaderboard")]
     ]
 
+    # Send profile details with buttons
     await message.reply_text(profile_text, reply_markup=InlineKeyboardMarkup(buttons))
 
-# Callback handler for refreshing profile (just re-show the profile)
-@shivuu.on_callback_query(filters.regex("refresh_profile"))
-async def refresh_profile(client, callback_query):
-    user_id = callback_query.from_user.id
-    user_data = await xy.find_one({"player_id": user_id})
-    # Get the user's inventory count
-    inventory_items = await xy.find({"player_id": user_id, "inventory": {"$exists": True}})
-    item_count = len(inventory_items)
-
-    profile_text = f"📜 **{callback_query.from_user.first_name}'s Profile**:\n\n"
-    profile_text += f"**Lund Size:** {user_data.get('lund_size', 1.0)} cm\n"
-    profile_text += f"**League:** {user_data.get('league', 'Grunt 🌱')}\n"
-    profile_text += f"**Laudacoin:** {user_data.get('laudacoin', 0)} 💰\n"
-    profile_text += f"**Progress to Next Level:** {user_data.get('progress', 0)}%\n"
-    profile_text += f"**Daily Streak:** {user_data.get('streak', 1)} days\n"
-
-    # Inventory section with item count
-    profile_text += f"\n🛍️ **Inventory:** {item_count} items\n"
-    if inventory_items:
-        for item in inventory_items:
-            profile_text += f"- {item['item']} (Acquired: {item['acquired_date']})\n"
-    else:
-        profile_text += "No items acquired yet.\n"
-
-    await callback_query.message.edit_text(profile_text, reply_markup=callback_query.message.reply_markup)
-
-# Callback handler for checking goal progress (dummy functionality for now)
+# Callback handler for 'Check Goal Progress'
 @shivuu.on_callback_query(filters.regex("check_goal_progress"))
 async def goal_progress(client, callback_query):
-    # Dummy goal progress
-    await callback_query.answer("🎯 You’ve grown by 2.5 cm! Keep going!")
+    # Display goal progress (dummy for now)
+    await callback_query.answer("🎯 You’ve grown by 2.3 cm! Keep pushing to the next level.")
 
-# Callback handler for rolling random reward (link to lstart.py)
-@shivuu.on_callback_query(filters.regex("roll_reward"))
-async def roll_reward(client, callback_query):
-    reward = random_reward()
-    await callback_query.answer(f"🎉 You rolled a {reward['reward']} and received: {reward['amount']}!")
+# Callback handler for 'Claim Daily Bonus'
+@shivuu.on_callback_query(filters.regex("claim_daily_bonus"))
+async def claim_daily_bonus(client, callback_query):
+    # Add daily bonus (dummy for now)
+    daily_bonus = 10
+    user_id = callback_query.from_user.id
+    await xy.update_one({"player_id": user_id}, {"$inc": {"laudacoin": daily_bonus}})
+    await callback_query.answer(f"🎁 You’ve claimed your daily bonus of {daily_bonus} Laudacoin!")
+
+# Callback handler for 'Manage Inventory'
+@shivuu.on_callback_query(filters.regex("manage_inventory"))
+async def manage_inventory(client, callback_query):
+    """Display inventory items and quantities."""
+    user_id = callback_query.from_user.id
+    user_data = await xy.find_one({"player_id": user_id})
+
+    # Show the inventory items (dummy data for now)
+    inventory = user_data.get('inventory', {})
+    inventory_text = "🛒 **Your Inventory**:\n"
+
+    if not inventory:
+        inventory_text += "No items in your inventory. Try to earn some!"
+    else:
+        for item, count in inventory.items():
+            inventory_text += f"{item}: {count} 📦\n"
+
+    await callback_query.message.edit_text(inventory_text, reply_markup=callback_query.message.reply_markup)
