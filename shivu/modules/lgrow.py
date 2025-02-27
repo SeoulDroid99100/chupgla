@@ -44,6 +44,7 @@ async def apply_decay():
         
         await asyncio.sleep(3600)  # Run every hour
 
+
 # 🚀 Lund Growth Command
 @shivuu.on_message(filters.command("lgrow"))
 async def grow_lund(client, message):
@@ -120,4 +121,4 @@ async def boost_callback(client, callback_query):
     await callback_query.answer("🔥 Boosting feature coming soon!", show_alert=True)
 
 # 🔥 Start Decay Loop
-asyncio.create_task(apply_decay())
+shivuu.create_task(apply_decay())
