@@ -29,7 +29,7 @@ def create_progress_bar(percentage):
     empty = '░' * (20 - len(filled))
     return f"{filled}{empty} {percentage:.1f}%"
 
-@shivuu.on_message(filters.command("lprofile"))
+@shivuu.on_message(filters.command("lprofile")) #Works on group and PM
 async def profile_handler(client: shivuu, message: Message):
     user_id = message.from_user.id
     user_data = await xy.find_one({"user_id": user_id})
