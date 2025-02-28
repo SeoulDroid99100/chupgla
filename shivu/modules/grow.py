@@ -1,5 +1,5 @@
 from shivu import shivuu, xy
-from pyrogram import filters
+from pyrogram import filters, errors
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime, timedelta
 import random
@@ -67,13 +67,18 @@ async def get_ranking(user_id: int, current_size: float) -> tuple[int, int]:
 async def calculate_percentage_smaller(user_id: int, current_size: float) -> float:
     """Calculates the percentage of users with a smaller lund_size."""
     try:
-        total_users = await xy.count_documents({})
-        if total_users == 0:  # Avoid division by zero
-            return 0.0
-
+        # Count total users with lund_size (exclude users without progression data)
+        total_users = await xy.count_documents({"progression.lund_size": {"$exists": True}})
+        
+        if total_users <= 1:
+            return 100.0  # You're the only one or no users
+        
+        # Count users smaller than current size
         smaller_users_count = await xy.count_documents({"progression.lund_size": {"$lt": current_size}})
-        percentage = (smaller_users_count / total_users) * 100
-        return round(percentage, 2)  # Round to two decimal places
+        
+        # Calculate percentage (exclude self from total)
+        percentage = (smaller_users_count / (total_users - 1)) * 100
+        return round(percentage, 2)
 
     except Exception as e:
         logger.exception(f"Error in calculate_percentage_smaller: {e}")
@@ -83,36 +88,46 @@ async def calculate_percentage_smaller(user_id: int, current_size: float) -> flo
 @shivuu.on_message(filters.command(["ltrain", "train", "lgrow", "grow"]))
 async def training_command(client: shivuu, message: Message):
     user_id = message.from_user.id
-    user_data = await xy.find_one({"user_id": user_id})
 
-    if not user_data:
-        await message.reply(small_caps_bold("ᴘʀᴏғɪʟᴇ ɴᴏᴛ ғᴏᴜɴᴅ! ᴜsᴇ /ʟsᴛᴀʀᴛ ᴛᴏ ʙᴇɢɪɴ."))
-        return
+    try:
+        user_data = await xy.find_one({"user_id": user_id})
 
-    # --- Cooldown Check ---
-    last_trained = user_data.get("progression", {}).get("last_trained")
-    if last_trained:
-        time_since_last_train = datetime.utcnow() - last_trained
-        if time_since_last_train.total_seconds() < TRAINING_COOLDOWN:
-            remaining_cooldown = timedelta(seconds=TRAINING_COOLDOWN) - time_since_last_train
-            await message.reply(small_caps_bold(f"ᴛʀᴀɪɴɪɴɢ ɪs ᴏɴ ᴄᴏᴏʟᴅᴏᴡɴ. ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ {remaining_cooldown}."))
+        if not user_data:
+            await message.reply(small_caps_bold("ᴘʀᴏғɪʟᴇ ɴᴏᴛ ғᴏᴜɴᴅ! ᴜsᴇ /ʟsᴛᴀʀᴛ ᴛᴏ ʙᴇɢɪɴ."))
             return
 
-    # --- Difficulty Selection (Inline Keyboard) ---
-    buttons = []
-    for difficulty, settings in DIFFICULTY_SETTINGS.items():
-        label = settings["label"]
-        range_str = f"{settings['range'][0]}-{settings['range'][1]} ᴄᴍ"
-        success_str = f"{int(settings['success_rate'] * 100)}%"
-        button_text = f"{label} ({range_str}, {success_str})"
-        buttons.append(
-            InlineKeyboardButton(small_caps_bold(button_text), callback_data=f"train_{difficulty}")
-        )
+        # --- Cooldown Check ---
+        last_trained = user_data.get("progression", {}).get("last_trained")
+        if last_trained:
+            time_since_last_train = datetime.utcnow() - last_trained
+            if time_since_last_train.total_seconds() < TRAINING_COOLDOWN:
+                remaining_cooldown = timedelta(seconds=TRAINING_COOLDOWN) - time_since_last_train
+                await message.reply(small_caps_bold(f"ᴛʀᴀɪɴɪɴɢ ɪs ᴏɴ ᴄᴏᴏʟᴅᴏᴡɴ. ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ {remaining_cooldown}."))
+                return
 
-    # Arrange buttons in a 2x2 grid
-    keyboard = [buttons[:2], buttons[2:]]
-    difficulty_keyboard = InlineKeyboardMarkup(keyboard)
-    await message.reply(small_caps_bold("ᴄʜᴏᴏsᴇ ᴀ ᴛʀᴀɪɴɪɴɢ ᴅɪғғɪᴄᴜʟᴛʏ:"), reply_markup=difficulty_keyboard)
+        # --- Difficulty Selection (Inline Keyboard) ---
+        buttons = []
+        for difficulty, settings in DIFFICULTY_SETTINGS.items():
+            label = settings["label"]
+            range_str = f"{settings['range'][0]}-{settings['range'][1]} ᴄᴍ"
+            success_str = f"{int(settings['success_rate'] * 100)}%"
+            button_text = f"{label} ({range_str}, {success_str})"
+            buttons.append(
+                InlineKeyboardButton(small_caps_bold(button_text), callback_data=f"train_{difficulty}")
+            )
+
+        # Arrange buttons in a 2x2 grid
+        keyboard = [buttons[:2], buttons[2:]]
+        difficulty_keyboard = InlineKeyboardMarkup(keyboard)
+        await message.reply(small_caps_bold("ᴄʜᴏᴏsᴇ ᴀ ᴛʀᴀɪɴɪɴɢ ᴅɪғғɪᴄᴜʟᴛʏ:"), reply_markup=difficulty_keyboard)
+
+    except errors.MessageNotModified:
+        # Handle the case where the message is not modified (e.g., user clicks the same button)
+        pass
+    except Exception as e:
+        logger.exception(f"Error in training_command: {e}")
+        await message.reply(small_caps_bold("ᴀɴ ᴜɴᴇxᴘᴇᴄᴛᴇᴅ ᴇʀʀᴏʀ ᴏᴄᴄᴜʀʀᴇᴅ."))
+
 
 
 @shivuu.on_callback_query(filters.regex(r"^train_(peaceful|easy|hard|hardcore)$"))
@@ -120,74 +135,98 @@ async def training_callback(client: shivuu, callback_query):
     user_id = callback_query.from_user.id
     difficulty = callback_query.data.split("_")[1]  # Extract difficulty
 
-    user_data = await xy.find_one({"user_id": user_id})
-    if not user_data: # Re-check for user data
-        await callback_query.answer(small_caps_bold("ᴘʀᴏғɪʟᴇ ɴᴏᴛ ғᴏᴜɴᴅ! ᴜsᴇ /ʟsᴛᴀʀᴛ ᴛᴏ ʙᴇɢɪɴ."), show_alert=True)
-        return
-
-    # --- Cooldown Check (within callback) ---
-    last_trained = user_data.get("progression", {}).get("last_trained")
-    if last_trained:
-        time_since_last_train = datetime.utcnow() - last_trained
-        if time_since_last_train.total_seconds() < TRAINING_COOLDOWN:
-            remaining_cooldown = timedelta(seconds=TRAINING_COOLDOWN) - time_since_last_train
-            await callback_query.answer(small_caps_bold(f"ᴛʀᴀɪɴɪɴɢ ɪs ᴏɴ ᴄᴏᴏʟᴅᴏᴡɴ. ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ {remaining_cooldown}."), show_alert=True)
+    try:
+        user_data = await xy.find_one({"user_id": user_id})
+        if not user_data: # Re-check for user data
+            await callback_query.answer(small_caps_bold("ᴘʀᴏғɪʟᴇ ɴᴏᴛ ғᴏᴜɴᴅ! ᴜsᴇ /ʟsᴛᴀʀᴛ ᴛᴏ ʙᴇɢɪɴ."), show_alert=True)
             return
 
-    # --- Perform Training ---
-    try:
-        growth = await calculate_growth(difficulty)
-        if growth > 0:
-            new_size = round(user_data["progression"]["lund_size"] + growth, 2)
-            update_data = {
-                "$set": {
-                    "progression.lund_size": new_size,
-                    "progression.last_trained": datetime.utcnow(),
-                },
-            }
-            result_message = f"🗿 **ɢʀᴏᴡᴛʜ:** +**{growth}**ᴄᴍ 📈\n" # Indicate successful growth
-        else:
-            new_size = user_data["progression"]["lund_size"]  # No change in size
-            update_data = {
-                "$set": {
-                    "progression.last_trained": datetime.utcnow(),
+        # --- Cooldown Check (within callback) ---
+        last_trained = user_data.get("progression", {}).get("last_trained")
+        if last_trained:
+            time_since_last_train = datetime.utcnow() - last_trained
+            if time_since_last_train.total_seconds() < TRAINING_COOLDOWN:
+                remaining_cooldown = timedelta(seconds=TRAINING_COOLDOWN) - time_since_last_train
+                await callback_query.answer(small_caps_bold(f"ᴛʀᴀɪɴɪɴɢ ɪs ᴏɴ ᴄᴏᴏʟᴅᴏᴡɴ. ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ {remaining_cooldown}."), show_alert=True)
+                return
+
+        # --- Perform Training ---
+        try:
+            growth = await calculate_growth(difficulty)
+            if growth > 0:
+                new_size = round(user_data["progression"]["lund_size"] + growth, 2)
+                update_data = {
+                    "$set": {
+                        "progression.lund_size": new_size,
+                        "progression.last_trained": datetime.utcnow(),
+                    },
                 }
-            }
-            result_message = "❌ **ᴛʀᴀɪɴɪɴɢ ғᴀɪʟᴇᴅ!** ɴᴏ ɢʀᴏᴡᴛʜ ᴛʜɪs ᴛɪᴍᴇ. 🙁\n"
+                result_message = f"🗿 **ɢʀᴏᴡᴛʜ:** +**{growth}**ᴄᴍ 📈\n" # Indicate successful growth
+            else:
+                new_size = user_data["progression"]["lund_size"]  # No change in size
+                update_data = {
+                    "$set": {
+                        "progression.last_trained": datetime.utcnow(),
+                    }
+                }
+                result_message = "❌ **ᴛʀᴀɪɴɪɴɢ ғᴀɪʟᴇᴅ!** ɴᴏ ɢʀᴏᴡᴛʜ ᴛʜɪs ᴛɪᴍᴇ. 🙁\n"
 
-        await xy.update_one({"user_id": user_id}, update_data)
+            await xy.update_one({"user_id": user_id}, update_data)
 
+
+        except Exception as e:
+            logger.exception(f"Error during training update: {e}")
+            await callback_query.answer(small_caps_bold("ᴀɴ ᴇʀʀᴏʀ ᴏᴄᴄᴜʀʀᴇᴅ ᴅᴜʀɪɴɢ ᴛʀᴀɪɴɪɴɢ. ᴘʟᴇᴀsᴇ ᴛʀʏ ᴀɢᴀɪɴ ʟᴀᴛᴇʀ."), show_alert=True)
+            return
+
+        # --- Get Ranking and Percentage ---
+        try:
+            rank, total_users = await get_ranking(user_id, new_size)
+            percentage_smaller = await calculate_percentage_smaller(user_id, new_size)
+
+            next_train_time = datetime.utcnow() + timedelta(seconds=TRAINING_COOLDOWN)
+            next_train_str = next_train_time.strftime("%Hʜ %Mᴍ")  # Format as "Xh Ym"
+
+        except Exception as e:
+            logger.exception(f"Error during rank calculation: {e}")
+            await callback_query.answer(small_caps_bold("ᴀɴ ᴇʀʀᴏʀ ᴏᴄᴄᴜʀʀᴇᴅ ᴡʜɪʟᴇ ғᴇᴛᴄʜɪɴɢ ʀᴀɴᴋɪɴɢ ɪɴғᴏʀᴍᴀᴛɪᴏɴ."), show_alert=True)
+            return
+
+        # --- Build Response Message ---
+        response = (
+            "```markdown\n"
+            "⠀⠀⠀⠀⠀⠀⠀⣠⣤⣤⣤⣤⣤⣄⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\n"
+            "⠀⠀⠀⠀⠀⢰⡿⠋⠁⠀⠀⠈⠉⠙⠻⣷⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\n"
+            "⠀⠀⠀⠀⢀⣿⠇⠀⢀⣴⣶⡾⠿⠿⠿⢿⣿⣦⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\n"
+            "⠀⠀⣀⣀⣸⡿⠀⠀⢸⣿⣇⠀⠀⠀⠀⠀⠀⠙⣷⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\n"
+            "⠀⣾⡟⠛⣿⡇⠀⠀⢸⣿⣿⣷⣤⣤⣤⣤⣶⣶⣿⠇⠀⠀⠀⠀⠀⠀⠀⣀⠀⠀\n"
+            "⢀⣿⠀⢀⣿⡇⠀⠀⠀⠻⢿⣿⣿⣿⣿⣿⠿⣿⡏⠀⠀⠀⠀⢴⣶⣶⣿⣿⣿⣆\n"
+            "⢸⣿⠀⢸⣿⡇⠀⠀⠀⠀⠀⠈⠉⠁⠀⠀⠀⣿⡇⣀⣠⣴⣾⣮⣝⠿⠿⠿⣻⡟\n"
+            "⢸⣿⠀⠘⣿⡇⠀⠀⠀⠀⠀⠀⠀⣠⣶⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠁⠉⠀\n"
+            "⠸⣿⠀⠀⣿⡇⠀⠀⠀⠀⠀⣠⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠟⠉⠀⠀⠀⠀\n"
+            "⠀⠻⣷⣶⣿⣇⠀⠀⠀⢠⣼⣿⣿⣿⣿⣿⣿⣿⣛⣛⣻⠉⠁⠀⠀⠀⠀⠀⠀⠀\n"
+            "⠀⠀⠀⠀⢸⣿⠀⠀⠀⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀\n"
+            "⠀⠀⠀⠀⢸⣿⣀⣀⣀⣼⡿⢿⣿⣿⣿⣿⣿⡿⣿⣿⡿⠀⠀⠀⠀⠀⠀⠀⠀⠀\n"
+            "⠀⠀⠀⠀⠀⠙⠛⠛⠛⠋⠁⠀⠙⠻⠿⠟⠋⠑⠛⠋⠀\n"
+            "```  \n\n"
+            "╭━〔🍌〕━━━━━━━━━〔🍌〕  \n"
+            "┃   💦 **ᴇᴠᴏʟᴜᴛɪᴏɴ ᴄᴏᴍᴘʟᴇᴛᴇ!** 💦      \n"
+            "╰━〔🍌〕━━━━━━━━━〔🍌〕\n\n"
+            "🧬 **ʏᴏᴜʀ ʟᴇɢᴇɴᴅᴀʀʏ ʟᴜɴᴅ ʜᴀs ᴜɴʟᴏᴄᴋᴇᴅ ɪᴛs ᴘᴏᴛᴇɴᴛɪᴀʟ!**\n"
+            f"{result_message}"
+            f"🔹 **ᴄᴜʀʀᴇɴᴛ sɪᴢᴇ:** **{new_size}**ᴄᴍ 👹\n"
+            f"🏆 **ᴛᴏᴘ ʀᴀɴᴋɪɴɢ:** #**{rank}** 👑\n"
+            f"⏳ **ɴᴇxᴛ ᴇɴʜᴀɴᴄᴇᴍᴇɴᴛ ɪɴ:** {next_train_str} ⌛\n\n"
+            "╭━━━━━━ ⋆⋅☆⋅⋆ ━━━━━━╮\n"
+            f"  🔻 **ʏᴏᴜ ᴀʀᴇ ʙɪɢɢᴇʀ ᴛʜᴀɴ** **{percentage_smaller}%** **ᴏғ ᴘʟᴀʏᴇʀs** 🔻\n"
+            "╰━━━━━━ ⋆⋅☆⋅⋆ ━━━━━━╯"
+        )
+        await callback_query.edit_message_text(response, parse_mode="MarkdownV2") # Edit the *original* message
+
+    except errors.MessageNotModified:
+        # Handle the case where the message content is the same
+        await callback_query.answer("No changes to apply.")
 
     except Exception as e:
-        logger.exception(f"Error during training update: {e}")
-        await callback_query.answer(small_caps_bold("ᴀɴ ᴇʀʀᴏʀ ᴏᴄᴄᴜʀʀᴇᴅ ᴅᴜʀɪɴɢ ᴛʀᴀɪɴɪɴɢ. ᴘʟᴇᴀsᴇ ᴛʀʏ ᴀɢᴀɪɴ ʟᴀᴛᴇʀ."), show_alert=True)
-        return
-
-    # --- Get Ranking and Percentage ---
-    try:
-        rank, total_users = await get_ranking(user_id, new_size)
-        percentage_smaller = await calculate_percentage_smaller(user_id, new_size)
-
-        next_train_time = datetime.utcnow() + timedelta(seconds=TRAINING_COOLDOWN)
-        next_train_str = next_train_time.strftime("%Hʜ %Mᴍ")  # Format as "Xh Ym"
-
-    except Exception as e:
-        logger.exception(f"Error during rank calculation: {e}")
-        await callback_query.answer(small_caps_bold("ᴀɴ ᴇʀʀᴏʀ ᴏᴄᴄᴜʀʀᴇᴅ ᴡʜɪʟᴇ ғᴇᴛᴄʜɪɴɢ ʀᴀɴᴋɪɴɢ ɪɴғᴏʀᴍᴀᴛɪᴏɴ."), show_alert=True)
-        return
-
-    # --- Build Response Message ---
-    response = (
-        "╔═⟪⚙⟫══════════════════════════════════╗\n"
-        "   〄 **ᴇᴠᴏʟᴜᴛɪᴏɴ ᴄᴏᴍᴘʟᴇᴛᴇ!** 〄   \n"
-        "╚═⟪⚙⟫══════════════════════════════════╝\n\n"
-        "🧬 **ʏᴏᴜʀ ʟᴇɢᴇɴᴅᴀʀʏ ʟᴜɴᴅ ʜᴀs ᴜɴʟᴏᴄᴋᴇᴅ ɪᴛs ᴘᴏᴛᴇɴᴛɪᴀʟ!**\n"
-        f"{result_message}"
-        f"🔹 **ᴄᴜʀʀᴇɴᴛ sɪᴢᴇ:** **{new_size}**ᴄᴍ 👹\n"
-        f"🏆 **ᴛᴏᴘ ʀᴀɴᴋɪɴɢ:** #**{rank}** 👑\n"
-        f"⏳ **ɴᴇxᴛ ᴇɴʜᴀɴᴄᴇᴍᴇɴᴛ ɪɴ:** {next_train_str} ⌛\n\n"
-        "╭━ ⋆⋅☆⋅⋆ ━╮\n"
-        f"  🔻 ʏᴏᴜ ᴀʀᴇ ʙɪɢɢᴇʀ ᴛʜᴀɴ **{percentage_smaller}%** ᴏғ ᴘʟᴀʏᴇʀs 🔻\n"
-        "╰━ ⋆⋅☆⋅⋆ ━╯"
-    )
-    await callback_query.edit_message_text(small_caps_bold(response)) # Edit the *original* message
+        logger.exception(f"Error in training_callback: {e}")
+        await callback_query.answer(small_caps_bold("ᴀɴ ᴜɴᴇxᴘᴇᴄᴛᴇᴅ ᴇʀʀᴏʀ ᴏᴄᴄᴜʀʀᴇᴅ."), show_alert=True)
