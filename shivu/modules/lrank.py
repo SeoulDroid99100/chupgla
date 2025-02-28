@@ -251,21 +251,3 @@ async def swap_buttons(client, callback):
     # Refresh lrank output
     await refresh_rank(client, callback) #Function
 
-#-----INIT----
-
-#This function needs to be started, to make it load
-# This should load when you star the bot
-task = None#Global Task
-@shivuu.on_ready()
-async def start_task(client):#Functions to start the bot.
-
-#Try not touch anything.
-#Load tasks on start and if that crash try ctask
-#If still crash make new and new and see log.
-    global task#Global
-    from shivu.modules.lrank import periodic_rank_updates#import again if needed.
-    if task is None:#Chek if the other task is none
-        task = shivuu.loop.create_task(periodic_rank_updates()) #Try the first method
-        print("load or make other")#For log the owner bot
-    else: #Print what happens and logs
-        print ("The load or function still no running you need change, copy from the new ones to the bot, restart the bot and if all fails re edit these parts of the code")
