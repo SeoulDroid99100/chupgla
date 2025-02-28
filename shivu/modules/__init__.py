@@ -1,3 +1,5 @@
+# shivu/modules/__init__.py
+
 import logging
 import sys
 import time
@@ -64,5 +66,11 @@ def __list_all_modules():
 
 
 ALL_MODULES = __list_all_modules()
+try:
+    ALL_MODULES.remove("ltrain")
+except ValueError:
+    pass
+
+ALL_MODULES.append("grow") #Add to the list for the bot to import
 LOGGER.info("Modules to load: %s", str(ALL_MODULES))
 __all__ = ALL_MODULES + ["ALL_MODULES"]
