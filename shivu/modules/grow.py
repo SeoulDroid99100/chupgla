@@ -4,7 +4,7 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime, timedelta
 import random
 import logging
-
+from pyrogram import enums
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -221,7 +221,7 @@ async def training_callback(client: shivuu, callback_query):
             f"  🔻 **ʏᴏᴜ ᴀʀᴇ ʙɪɢɢᴇʀ ᴛʜᴀɴ** **{percentage_smaller}%** **ᴏғ ᴘʟᴀʏᴇʀs** 🔻\n"
             "╰━━━━━━ ⋆⋅☆⋅⋆ ━━━━━━╯"
         )
-        await callback_query.edit_message_text(response, parse_mode="MarkdownV2") # Edit the *original* message
+        await callback_query.edit_message_text(response, parse_mode=enums.ParseMode.MARKDOWN) # Edit the *oriMarsage
 
     except errors.MessageNotModified:
         # Handle the case where the message content is the same
