@@ -40,7 +40,7 @@ for module_name in ALL_MODULES:
 # Start task
 
 
-def main() -> None:
+async def main() -> None:
     """Run bot."""
     application.run_polling(drop_pending_updates=True)
     await initialize_rank_db()  # Call both initialization functions
