@@ -1,6 +1,6 @@
 # shivu/modules/lcoin.py
 
-from shivu import shivuu, xy  # We'll modify shivu/__init__.py, too
+from shivu import shivuu, xy
 from pyrogram import filters, enums
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime, timedelta
@@ -14,10 +14,9 @@ logger = logging.getLogger(__name__)
 
 # --- Constants ---
 SEND_COOLDOWN = 60  # Seconds
-TRANSACTIONS_PER_PAGE = 10 # Constant
+TRANSACTIONS_PER_PAGE = 10  # Constant
 
 # --- MongoDB Connection (for Transactions) ---
-# We keep this separate connection, BUT we'll load recent tx into user_data
 TRANSACTION_MONGO_URI = "mongodb+srv://Tbot:cLEZofvA7zLXPYBB@cluster0.cgldf.mongodb.net/?retryWrites=true&w=majority"
 TRANSACTION_DB_NAME = "telegram_transactions"
 TRANSACTION_COLLECTION_NAME = "transactions"
@@ -27,6 +26,7 @@ try:
     transaction_client.admin.command('ping')
     transaction_db = transaction_client[TRANSACTION_DB_NAME]
     transaction_collection = transaction_db[TRANSACTION_COLLECTION_NAME]
+    transaction_collection.create_index([("participant_ids", 1), ("timestamp", -1)]) #Combined Index
     transaction_collection.create_index([("sender_id", 1), ("timestamp", -1)])
     transaction_collection.create_index([("recipient_id", 1), ("timestamp", -1)])
     transaction_collection.create_index([("timestamp", -1)])
@@ -49,40 +49,10 @@ def small_caps_bold(text):
     bold_text = ''.join(small_caps_map.get(char.upper(), char) for char in text)
     return f"**{bold_text}**"
 
-async def get_user_data_with_transactions(user_id: int, tx_limit: int = 50):
-    """Fetches user data AND their most recent transactions in one go."""
-    pipeline = [
-        {
-            "$match": {"user_id": user_id}
-        },
-        {
-            "$lookup": {
-                "from": "transactions",  # Join with the transactions collection
-                "let": {"user_id": "$user_id"},
-                "pipeline": [
-                    {
-                        "$match": {
-                            "$expr": {  # Use $expr for aggregation-based matching
-                                "$or": [
-                                    {"$eq": ["$sender_id", "$$user_id"]},
-                                    {"$eq": ["$recipient_id", "$$user_id"]},
-                                ]
-                            }
-                        }
-                    },
-                    {"$sort": {"timestamp": -1}},  # Newest transactions first
-                    {"$limit": tx_limit},  # Limit the number of transactions
-                ],
-                "as": "recent_transactions",  # Store in a field called "recent_transactions"
-            }
-        },
-    ]
 
-    result = await xy.aggregate(pipeline).to_list(length=1)
-    if result:
-        return result[0]  # Return the first (and only) document
-    else:
-        return None #Or not exists
+async def get_user_data(user_id: int):
+    """Fetches user data."""
+    return await xy.find_one({"user_id": user_id})
 
 
 async def log_transaction(
@@ -96,6 +66,12 @@ async def log_transaction(
 ) -> None:
     """Logs a transaction to the database."""
 
+    participant_ids = []
+    if sender_id is not None:
+        participant_ids.append(sender_id)
+    if recipient_id is not None:
+        participant_ids.append(recipient_id)
+
     transaction_doc = {
         "timestamp": datetime.utcnow(),
         "sender_id": sender_id,
@@ -105,6 +81,7 @@ async def log_transaction(
         "type": transaction_type,
         "status": status,
         "notes": notes,
+        "participant_ids": participant_ids, #Crucial for efficient queries
     }
     await transaction_collection.insert_one(transaction_doc)
 
@@ -121,8 +98,7 @@ async def coin_handler(client: shivuu, message: Message):
 async def _show_main_menu(client, message, is_callback=False):
     """Helper function to display the main menu."""
     user_id = message.from_user.id
-    # Use the new function to fetch user data *and* transactions
-    user_data = await get_user_data_with_transactions(user_id)
+    user_data = await get_user_data(user_id)
 
     if not user_data:
         text = small_caps_bold("⌧ ᴀᴄᴄᴏᴜɴᴛ ɴᴏᴛ ғᴏᴜɴᴅ! ᴜsᴇ /ʟsᴛᴀʀᴛ ᴛᴏ ʀᴇɢɪsᴛᴇʀ.")
@@ -136,15 +112,9 @@ async def _show_main_menu(client, message, is_callback=False):
         ])
 
     if is_callback:
-        if buttons:
-            await message.edit_text(text, reply_markup=buttons)
-        else:
-            await message.edit_text(text)
+        await message.edit_text(text, reply_markup=buttons)
     else:
-        if buttons:
-            await message.reply(text, reply_markup=buttons)
-        else:
-            await message.reply(text)
+        await message.reply(text, reply_markup=buttons)
 
 
 
@@ -163,11 +133,8 @@ async def show_balance(client, message, user_data):
     )
     buttons = [[InlineKeyboardButton(small_caps_bold("« ʙᴀᴄᴋ"), callback_data="coin_main")]]
     reply_markup = InlineKeyboardMarkup(buttons)
+    await message.edit_text(response, reply_markup=reply_markup)
 
-    if isinstance(message, Message):
-        await message.reply(response, reply_markup=reply_markup)
-    else:
-        await message.edit_text(response, reply_markup=reply_markup)
 
 
 async def _build_history_response(client, transactions, page, total_pages):
@@ -210,24 +177,27 @@ async def _build_history_response(client, transactions, page, total_pages):
 async def show_history(client, message, user_data, page=0):
     """Shows the user's transaction history (with pagination)."""
 
-    transactions = user_data.get('recent_transactions', []) # Get from user_data!
-    total_transactions = len(transactions)  # No separate count needed
+    user_id = user_data['user_id']
+    query = {"participant_ids": user_id}
+
+    # Get total transactions for pagination
+    total_transactions = await transaction_collection.count_documents(query)
     total_pages = (total_transactions + TRANSACTIONS_PER_PAGE - 1) // TRANSACTIONS_PER_PAGE
+    page = max(0, min(page, total_pages - 1))
+
+    # Fetch paginated transactions, directly from the transaction collection.
+    transactions_cursor = transaction_collection.find(query).sort("timestamp", -1)  # Newest first
+    transactions_cursor = transactions_cursor.skip(page * TRANSACTIONS_PER_PAGE).limit(TRANSACTIONS_PER_PAGE)
+    transactions = await transactions_cursor.to_list(length=TRANSACTIONS_PER_PAGE)
 
 
-    if not transactions: # Changed condition
+    if not transactions:
         buttons = [[InlineKeyboardButton(small_caps_bold("« ʙᴀᴄᴋ"), callback_data="coin_main")]]
         await message.edit_text(small_caps_bold("ɴᴏ ᴛʀᴀɴsᴀᴄᴛɪᴏɴs ғᴏᴜɴᴅ."), reply_markup=InlineKeyboardMarkup(buttons))
         return
 
-    page = max(0, min(page, total_pages - 1))
 
-    start_index = page * TRANSACTIONS_PER_PAGE
-    end_index = min((page + 1) * TRANSACTIONS_PER_PAGE, total_transactions)
-    current_page_transactions = transactions[start_index:end_index]
-
-    response_text = await _build_history_response(client, current_page_transactions, page, total_pages)
-
+    response_text = await _build_history_response(client, transactions, page, total_pages)
 
     buttons = []
     if page > 0:
@@ -236,14 +206,12 @@ async def show_history(client, message, user_data, page=0):
         buttons.append(InlineKeyboardButton(small_caps_bold("ɴᴇxᴛ »"), callback_data=f"coin_history_{page+1}"))
     buttons.append(InlineKeyboardButton(small_caps_bold("« ʙᴀᴄᴋ"), callback_data="coin_main"))
     reply_markup = InlineKeyboardMarkup([buttons] if len(buttons) <= 2 else [buttons[:2], [buttons[2]]])
-
-    if isinstance(message, Message):
-        await message.reply(response_text, reply_markup=reply_markup)
-    else:
-        await message.edit_text(response_text, reply_markup=reply_markup)
+    await message.edit_text(response_text, reply_markup=reply_markup)
 
 
-async def show_send_menu(client, message, is_callback=False):
+
+
+async def show_send_menu(client, message):
     """Displays the send menu with instructions."""
     text = (
         small_caps_bold("sᴇɴᴅ ʟᴀᴜᴅᴀᴄᴏɪɴs") + "\n\n" +
@@ -254,11 +222,8 @@ async def show_send_menu(client, message, is_callback=False):
         )
     buttons = [[InlineKeyboardButton(small_caps_bold("« ʙᴀᴄᴋ"), callback_data="coin_main")]]
     reply_markup = InlineKeyboardMarkup(buttons)
+    await message.edit_text(text, reply_markup=reply_markup, parse_mode=enums.ParseMode.MARKDOWN)
 
-    if is_callback:
-        await message.edit_text(text, reply_markup=reply_markup, parse_mode=enums.ParseMode.MARKDOWN)
-    else:
-        await message.reply(text, reply_markup=reply_markup, parse_mode=enums.ParseMode.MARKDOWN)
 
 
 @shivuu.on_callback_query(filters.regex(r"^coin_(balance|history|main|send)(?:_(\d+))?$"))
@@ -266,8 +231,8 @@ async def handle_coin_buttons(client: shivuu, callback_query):
     """Handles button presses for the /lcoin menu."""
     action = callback_query.data.split("_")[1]
     user_id = callback_query.from_user.id
-    # Fetch user data *with* transactions
-    user_data = await get_user_data_with_transactions(user_id)
+    # Fetch user data
+    user_data = await get_user_data(user_id)
 
     if not user_data:
         await callback_query.answer(small_caps_bold("⌧ ᴀᴄᴄᴏᴜɴᴛ ɴᴏᴛ ғᴏᴜɴᴅ! ᴜsᴇ /ʟsᴛᴀʀᴛ ᴛᴏ ʀᴇɢɪsᴛᴇʀ."), show_alert=True)
@@ -275,23 +240,18 @@ async def handle_coin_buttons(client: shivuu, callback_query):
 
     if action == "main":
         await _show_main_menu(client, callback_query.message, is_callback=True)
-        await callback_query.answer()
-
     elif action == "balance":
         await show_balance(client, callback_query.message, user_data)  # Pass user_data
-        await callback_query.answer()
-
     elif action == "history":
         try:
             page = int(callback_query.data.split("_")[2])
         except IndexError:
             page = 0
         await show_history(client, callback_query.message, user_data, page)  # Pass user_data
-        await callback_query.answer()
-
     elif action == "send":
-        await show_send_menu(client, callback_query.message, is_callback=True)
-        await callback_query.answer()
+        await show_send_menu(client, callback_query.message)
+
+    await callback_query.answer()
 
 
 
@@ -301,8 +261,7 @@ async def send_coins(client: shivuu, message: Message):
     """Handles the /lsend command to transfer coins."""
     sender_id = message.from_user.id
 
-    # Use the new function to get user data with transactions:
-    sender_data = await get_user_data_with_transactions(sender_id)
+    sender_data = await get_user_data(sender_id)
     if not sender_data:
         await message.reply(small_caps_bold("⌧ ᴀᴄᴄᴏᴜɴᴛ ɴᴏᴛ ғᴏᴜɴᴅ! ᴜsᴇ /ʟsᴛᴀʀᴛ ᴛᴏ ʀᴇɢɪsᴛᴇʀ."))
         return
@@ -346,8 +305,7 @@ async def send_coins(client: shivuu, message: Message):
         await message.reply(small_caps_bold("⌧ ʏᴏᴜ ᴄᴀɴɴᴏᴛ sᴇɴᴅ ᴄᴏɪɴs ᴛᴏ ʏᴏᴜʀsᴇʟғ."))
         return
 
-    # Also fetch recipient data *with* transactions
-    recipient_data = await get_user_data_with_transactions(recipient_id)
+    recipient_data = await get_user_data(recipient_id)
     if not recipient_data:
         await message.reply(small_caps_bold("⌧ ʀᴇᴄɪᴘɪᴇɴᴛ ʜᴀs ɴᴏᴛ sᴛᴀʀᴛᴇᴅ ᴛʜᴇ ʙᴏᴛ."))
         return
