@@ -32,7 +32,7 @@ try:
     print("Successfully connected to Transactions MongoDB (from lcoin.py)!")
 except Exception as e:
     print(f"Failed to connect to Transactions MongoDB (from lcoin.py): {e}")
-    exit(1)  # Exit if we can't connect!
+    exit(1)
 
 
 # --- Helper Functions ---
@@ -106,7 +106,7 @@ async def coin_handler(client: shivuu, message: Message):
 
 async def _show_main_menu(client, message, user_id=None, is_callback=False):
     if user_id is None:
-        user_id = message.from_user.id  # Default to message's user if not provided
+        user_id = message.from_user.id
     user_data = await get_user_data(user_id)
 
     if not user_data:
@@ -143,27 +143,26 @@ async def show_balance(client, message, user_data):
     await message.edit_text(response, reply_markup=InlineKeyboardMarkup(buttons))
 
 
-async def _build_history_response(client, transactions, page, total_pages):
+async def _build_history_response(client, transactions, page, total_pages, user_id):
     response = [small_caps_bold("ᴛʀᴀɴsᴀᴄᴛɪᴏɴ ʜɪsᴛᴏʀʏ") + f" (ᴘᴀɢᴇ {page+1}/{total_pages})\n"]
     for tx in transactions:
         date = tx["timestamp"].strftime("%m/%d %H:%M")
-        if tx["type"] == "send":
+
+        if tx["sender_id"] == user_id:
             direction = small_caps_bold("sᴇɴᴛ")
             counterpart_id = tx["recipient_id"]
-        elif tx["type"] == "receive":
+            action_word = "ᴛᴏ"
+        elif tx["recipient_id"] == user_id:
             direction = small_caps_bold("ʀᴇᴄᴇɪᴠᴇᴅ")
             counterpart_id = tx["sender_id"]
-        elif tx["type"] in ("earn", "reward"):
-            direction = small_caps_bold("ᴇᴀʀɴᴇᴅ")
-            counterpart_id = None
+            action_word = "ғʀᴏᴍ"
         else:
-            direction = small_caps_bold("ᴜɴᴋɴᴏᴡɴ")
-            counterpart_id = None
+            continue  # Skip if not sender or receiver
 
         if counterpart_id:
             try:
                 counterpart_user = await client.get_users(counterpart_id)
-                counterpart_name = counterpart_user.first_name or counterpart_user.username or str(counterpart_id)  # Handle missing username/firstname
+                counterpart_name = counterpart_user.first_name or counterpart_user.username or str(counterpart_id)
             except Exception:
                 counterpart_name = str(counterpart_id)
         else:
@@ -171,14 +170,17 @@ async def _build_history_response(client, transactions, page, total_pages):
 
         response.append(
             f"{date} {direction} {tx['amount']:.1f}ʟᴄ "
-            f"{'ᴛᴏ' if direction == 'sᴇɴᴛ' else 'ғʀᴏᴍ'} {small_caps_bold(counterpart_name)}"
+            f"{action_word} {small_caps_bold(counterpart_name)}"
         )
     return "\n".join(response)
 
 
 async def show_history(client, message, user_data, page=0):
     user_id = user_data['user_id']
+
+    # Optimized query using participant_ids
     query = {"participant_ids": user_id}
+
     total_transactions = await transaction_collection.count_documents(query)
     total_pages = (total_transactions + TRANSACTIONS_PER_PAGE - 1) // TRANSACTIONS_PER_PAGE
     page = max(0, min(page, total_pages - 1))
@@ -191,7 +193,7 @@ async def show_history(client, message, user_data, page=0):
         await message.edit_text(small_caps_bold("ɴᴏ ᴛʀᴀɴsᴀᴄᴛɪᴏɴs ғᴏᴜɴᴅ."), reply_markup=InlineKeyboardMarkup(buttons))
         return
 
-    response_text = await _build_history_response(client, transactions, page, total_pages)
+    response_text = await _build_history_response(client, transactions, page, total_pages, user_id)
     buttons = []
     if page > 0:
         buttons.append(InlineKeyboardButton(small_caps("« ᴘʀᴇᴠ"), callback_data=f"coin_history_{page-1}"))
@@ -202,8 +204,9 @@ async def show_history(client, message, user_data, page=0):
     await message.edit_text(response_text, reply_markup=reply_markup)
 
 
+
 async def show_send_menu(client, message):
-    """Displays the send menu with instructions."""
+    """Displays the send menu."""
     text = (
         small_caps_bold("sᴇɴᴅ ʟᴀᴜᴅᴀᴄᴏɪɴs") + "\n\n" +
         "To send Laudacoins, use the following command:\n" +
@@ -211,10 +214,8 @@ async def show_send_menu(client, message):
         "Or, reply to a user's message with:\n" +
         "`/lsend amount`"
     )
-    # Always include the back button, even on the send menu.
     buttons = [[InlineKeyboardButton(small_caps("« ʙᴀᴄᴋ"), callback_data="coin_main")]]
-    reply_markup = InlineKeyboardMarkup(buttons)
-    await message.edit_text(text, reply_markup=reply_markup, parse_mode=enums.ParseMode.MARKDOWN)
+    await message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=enums.ParseMode.MARKDOWN)
 
 
 # --- Callback Query Handler ---
@@ -222,10 +223,9 @@ async def show_send_menu(client, message):
 @shivuu.on_callback_query(filters.regex(r"^coin_(balance|history|main|send)(?:_(\d+))?$"))
 async def handle_coin_buttons(client: shivuu, callback_query):
     action = callback_query.data.split("_")[1]
-    user_id = callback_query.from_user.id  # Correct user ID
+    user_id = callback_query.from_user.id
     user_data = await get_user_data(user_id)
 
-    # Handle cases where user data isn't found (except for 'main' action)
     if not user_data and action != "main":
         await callback_query.answer(small_caps_bold("⌧ ᴀᴄᴄᴏᴜɴᴛ ɴᴏᴛ ғᴏᴜɴᴅ! ᴜsᴇ /ʟsᴛᴀʀᴛ ᴛᴏ ʀᴇɢɪsᴛᴇʀ."), show_alert=True)
         await _show_main_menu(client, callback_query.message, user_id=user_id, is_callback=True)
@@ -255,7 +255,6 @@ async def send_coins(client: shivuu, message: Message):
         await message.reply(small_caps_bold("⌧ ᴀᴄᴄᴏᴜɴᴛ ɴᴏᴛ ғᴏᴜɴᴅ! ᴜsᴇ /ʟsᴛᴀʀᴛ ᴛᴏ ʀᴇɢɪsᴛᴇʀ."))
         return
 
-    # --- Cooldown Check ---
     last_send_time = sender_data.get("economy", {}).get("last_send_time")
     if last_send_time:
         time_since_last_send = datetime.utcnow() - last_send_time
@@ -264,7 +263,6 @@ async def send_coins(client: shivuu, message: Message):
             await message.reply(small_caps_bold(f"ᴄᴏᴏʟᴅᴏᴡɴ ᴀᴄᴛɪᴠᴇ! ᴛʀʏ ᴀɢᴀɪɴ ɪɴ {int(remaining_cooldown.total_seconds())} sᴇᴄᴏɴᴅs."))
             return
 
-    # --- Input Validation and Recipient Resolution ---
     if len(message.command) < 2:
         await message.reply(small_caps_bold("⌧ ᴜsᴀɢᴇ: `/lsend @username amount`  ᴏʀ ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴜsᴇʀ ᴡɪᴛʜ `/lsend amount`"))
         return
@@ -303,34 +301,29 @@ async def send_coins(client: shivuu, message: Message):
     if not recipient_data:
         await message.reply(small_caps_bold("⌧ ʀᴇᴄɪᴘɪᴇɴᴛ ʜᴀs ɴᴏᴛ sᴛᴀʀᴛᴇᴅ ᴛʜᴇ ʙᴏᴛ."))
         return
-    # --- Custom Transaction Logic (No Session) ---
+
     try:
-        # 1. Deduct from sender (atomic conditional update)
         sender_update = await xy.update_one(
             {"user_id": sender_id, "economy.wallet": {"$gte": amount}},
             {"$inc": {"economy.wallet": -amount}}
         )
-
         if sender_update.modified_count == 0:
             await message.reply(small_caps_bold("⌧ ᴛʀᴀɴsᴀᴄᴛɪᴏɴ ғᴀɪʟᴇᴅ. ɪɴsᴜғғɪᴄɪᴇɴᴛ ғᴜɴᴅs ᴏʀ ᴇʀʀᴏʀ!"))
             return
 
-        # 2. Add to recipient (assumed to succeed if they exist)
         recipient_update = await xy.update_one(
             {"user_id": recipient_id},
             {"$inc": {"economy.wallet": amount}}
         )
-        if recipient_update.modified_count == 0:  #Recipient should exist if we got here.
-           await message.reply("Recipient error.")
-           return
+        if recipient_update.modified_count == 0:
+            await message.reply("Recipient error.")
+            return
 
-        # 3. Update timestamps and logs
         await xy.update_one(
             {"user_id": sender_id},
             {"$set": {"economy.last_send_time": datetime.utcnow()}}
         )
 
-        # 4. Log transactions
         await log_transaction(sender_id, recipient_id, amount, "send")
         await log_transaction(recipient_id, sender_id, amount, "receive")
 
@@ -339,8 +332,9 @@ async def send_coins(client: shivuu, message: Message):
         await message.reply(small_caps_bold("⌧ ᴛʀᴀɴsᴀᴄᴛɪᴏɴ ғᴀɪʟᴇᴅ ᴅᴜᴇ ᴛᴏ sᴇʀᴠᴇʀ ᴇʀʀᴏʀ!"))
         return
 
-    # Success message
+    # Success message (no small caps for the amount)
     await message.reply(
-        small_caps_bold(f"sᴜᴄᴄᴇssғᴜʟʟʏ sᴇɴᴛ {amount:.1f} ʟᴄ ᴛᴏ {recipient.first_name or recipient.username}!\n") +
-        small_caps_bold(f"ɴᴇᴡ ʙᴀʟᴀɴᴄᴇ: {sender_data['economy']['wallet'] - amount:.1f} ʟᴄ")
+      small_caps_bold(f"sᴜᴄᴄᴇssғᴜʟʟʏ sᴇɴᴛ ") + f"{amount:.1f} ʟᴄ " +
+      small_caps_bold(f"ᴛᴏ {recipient.first_name or recipient.username}!\n") +
+      small_caps_bold(f"ɴᴇᴡ ʙᴀʟᴀɴᴄᴇ: ") + f"{sender_data['economy']['wallet'] - amount:.1f} ʟᴄ"
     )
