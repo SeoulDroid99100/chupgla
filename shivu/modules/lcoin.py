@@ -4,7 +4,7 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime, timedelta
 import logging
 from typing import List, Dict, Tuple, Optional
-from motor.motor_asyncio import AsyncIOMotorClient  # Corrected import
+from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- Setup Logging ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -19,7 +19,7 @@ TRANSACTION_MONGO_URI = "mongodb+srv://Tbot:cLEZofvA7zLXPYBB@cluster0.cgldf.mong
 TRANSACTION_DB_NAME = "telegram_transactions"
 TRANSACTION_COLLECTION_NAME = "transactions"
 
-transaction_client = AsyncIOMotorClient(TRANSACTION_MONGO_URI)  # Corrected: No await here
+transaction_client = AsyncIOMotorClient(TRANSACTION_MONGO_URI)
 transaction_db = transaction_client[TRANSACTION_DB_NAME]
 transaction_collection = transaction_db[TRANSACTION_COLLECTION_NAME]
 
@@ -50,6 +50,17 @@ def small_caps_bold(text):
     bold_text = ''.join(small_caps_map.get(char.upper(), char) for char in text)
     return f"**{bold_text}**"
 
+def small_caps(text):
+    """Converts text to small caps (Unicode)."""
+    small_caps_map = {
+        'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ғ', 'G': 'ɢ',
+        'H': 'ʜ', 'I': 'ɪ', 'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ',
+        'O': 'ᴏ', 'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ', 'S': 's', 'T': 'ᴛ', 'U': 'ᴜ',
+        'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x', 'Y': 'ʏ', 'Z': 'ᴢ',
+        '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄', '5': '₅', '6': '₆',
+        '7': '₇', '8': '₈', '9': '₉',
+    }
+    return ''.join(small_caps_map.get(char.upper(), char) for char in text)
 
 async def get_user_data(user_id: int):
     """Fetches user data."""
@@ -103,10 +114,9 @@ async def _show_main_menu(client, message, is_callback=False):
         text = small_caps_bold("ʟᴀᴜᴅᴀᴄᴏɪɴ ʙᴀɴᴋɪɴɢ sʏsᴛᴇᴍ") + "\n\n" + small_caps_bold("ᴄʜᴏᴏsᴇ ᴀɴ ᴏᴘᴛɪᴏɴ:")
 
     buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton(small_caps_bold("⌂ ʙᴀʟᴀɴᴄᴇ"), callback_data="coin_balance"),
-            InlineKeyboardButton(small_caps_bold("≡ ʜɪsᴛᴏʀʏ"), callback_data="coin_history_0")],
-        [InlineKeyboardButton(small_caps_bold("⌳ sᴇɴᴅ"), callback_data="coin_send")],
-        [InlineKeyboardButton(small_caps_bold("« ʙᴀᴄᴋ"), callback_data="coin_main")]  # Always include back button
+        [InlineKeyboardButton(small_caps("⌂ ʙᴀʟᴀɴᴄᴇ"), callback_data="coin_balance"),
+            InlineKeyboardButton(small_caps("≡ ʜɪsᴛᴏʀʏ"), callback_data="coin_history_0")],
+        [InlineKeyboardButton(small_caps("⌳ sᴇɴᴅ"), callback_data="coin_send")],
     ])
 
     if is_callback:
@@ -128,7 +138,7 @@ async def show_balance(client, message, user_data):
         small_caps_bold("ʙᴀɴᴋ:") + f" {bank:.1f} ʟᴄ\n" +
         small_caps_bold("ᴛᴏᴛᴀʟ:") + f" {total:.1f} ʟᴄ"
     )
-    buttons = [[InlineKeyboardButton(small_caps_bold("« ʙᴀᴄᴋ"), callback_data="coin_main")]]
+    buttons = [[InlineKeyboardButton(small_caps("« ʙᴀᴄᴋ"), callback_data="coin_main")]]
     await message.edit_text(response, reply_markup=InlineKeyboardMarkup(buttons))
 
 
@@ -176,17 +186,17 @@ async def show_history(client, message, user_data, page=0):
     transactions = await transactions_cursor.to_list(length=TRANSACTIONS_PER_PAGE)
 
     if not transactions:
-        buttons = [[InlineKeyboardButton(small_caps_bold("« ʙᴀᴄᴋ"), callback_data="coin_main")]]
+        buttons = [[InlineKeyboardButton(small_caps("« ʙᴀᴄᴋ"), callback_data="coin_main")]]
         await message.edit_text(small_caps_bold("ɴᴏ ᴛʀᴀɴsᴀᴄᴛɪᴏɴs ғᴏᴜɴᴅ."), reply_markup=InlineKeyboardMarkup(buttons))
         return
 
     response_text = await _build_history_response(client, transactions, page, total_pages)
     buttons = []
     if page > 0:
-        buttons.append(InlineKeyboardButton(small_caps_bold("« ᴘʀᴇᴠ"), callback_data=f"coin_history_{page-1}"))
+        buttons.append(InlineKeyboardButton(small_caps("« ᴘʀᴇᴠ"), callback_data=f"coin_history_{page-1}"))
     if page < total_pages - 1:
-        buttons.append(InlineKeyboardButton(small_caps_bold("ɴᴇxᴛ »"), callback_data=f"coin_history_{page+1}"))
-    buttons.append(InlineKeyboardButton(small_caps_bold("« ʙᴀᴄᴋ"), callback_data="coin_main"))
+        buttons.append(InlineKeyboardButton(small_caps("ɴᴇxᴛ »"), callback_data=f"coin_history_{page+1}"))
+    buttons.append(InlineKeyboardButton(small_caps("« ʙᴀᴄᴋ"), callback_data="coin_main"))
     reply_markup = InlineKeyboardMarkup([buttons] if len(buttons) <= 2 else [buttons[:2], [buttons[2]]])
     await message.edit_text(response_text, reply_markup=reply_markup)
 
@@ -201,7 +211,7 @@ async def show_send_menu(client, message):
         "`/lsend amount`"
     )
     # Always include the back button, even on the send menu.
-    buttons = [[InlineKeyboardButton(small_caps_bold("« ʙᴀᴄᴋ"), callback_data="coin_main")]]
+    buttons = [[InlineKeyboardButton(small_caps("« ʙᴀᴄᴋ"), callback_data="coin_main")]]
     reply_markup = InlineKeyboardMarkup(buttons)
     await message.edit_text(text, reply_markup=reply_markup, parse_mode=enums.ParseMode.MARKDOWN)
 
@@ -298,34 +308,45 @@ async def send_coins(client: shivuu, message: Message):
         return
 
     # --- Perform Transaction (using atomic updates) ---
-    async with transaction_client.start_session() as session:  # Corrected: Use transaction_client
-        async with session.start_transaction():
-            sender_update_result = await xy.update_one(
-                {"user_id": sender_id, "economy.wallet": {"$gte": amount}},
-                {"$inc": {"economy.wallet": -amount}},
-                session=session
-            )
-            recipient_update_result = await xy.update_one(
-                {"user_id": recipient_id},
-                {"$inc": {"economy.wallet": amount}},
-                session=session
-            )
+    try:
+        async with await transaction_client.start_session() as session:
+            async with session.start_transaction():
+                sender_update_result = await xy.update_one(
+                    {"user_id": sender_id, "economy.wallet": {"$gte": amount}},
+                    {"$inc": {"economy.wallet": -amount}},
+                    session=session
+                )
+                recipient_update_result = await xy.update_one(
+                    {"user_id": recipient_id},
+                    {"$inc": {"economy.wallet": amount}},
+                    session=session
+                )
 
-            if sender_update_result.modified_count == 0 or recipient_update_result.modified_count == 0:
-                await session.abort_transaction()
-                await message.reply(small_caps_bold("⌧ ᴛʀᴀɴsᴀᴄᴛɪᴏɴ ғᴀɪʟᴇᴅ. ᴘʟᴇᴀsᴇ ᴛʀʏ ᴀɢᴀɪɴ."))
-                return
+                if sender_update_result.modified_count == 0 or recipient_update_result.modified_count == 0:
+                    await session.abort_transaction()
+                    await message.reply(small_caps_bold("⌧ ᴛʀᴀɴsᴀᴄᴛɪᴏɴ ғᴀɪʟᴇᴅ. ᴘʟᴇᴀsᴇ ᴛʀʏ ᴀɢᴀɪɴ."))
+                    return
 
-            # Log to the separate transactions DB
-            await log_transaction(sender_id, recipient_id, amount, "send")
-            await log_transaction(recipient_id, sender_id, amount, "receive")
+                # Log to the separate transactions DB
+                await log_transaction(sender_id, recipient_id, amount, "send")
+                await log_transaction(recipient_id, sender_id, amount, "receive")
 
-            # Update last send time (INSIDE the transaction)
-            await xy.update_one(
-                {"user_id": sender_id},
-                {"$set": {"economy.last_send_time": datetime.utcnow()}},
-                session=session
-            )
+                # Update last send time (INSIDE the transaction)
+                await xy.update_one(
+                    {"user_id": sender_id},
+                    {"$set": {"economy.last_send_time": datetime.utcnow()}},
+                    session=session
+                )
+    except TypeError as e:
+        logger.error(f"TypeError in transaction: {e}")
+        await message.reply(small_caps_bold("⌧ ᴛʀᴀɴsᴀᴄᴛɪᴏɴ ғᴀɪʟᴇᴅ. ᴘʟᴇᴀsᴇ ᴛʀʏ ᴀɢᴀɪɴ (ᴛʏᴘᴇ ᴇʀʀᴏʀ)."))
+        return
+    except Exception as e:
+        logger.exception(f"An unexpected error occurred during the transaction: {e}")
+        await message.reply(small_caps_bold("⌧ ᴛʀᴀɴsᴀᴄᴛɪᴏɴ ғᴀɪʟᴇᴅ ᴅᴜᴇ ᴛᴏ ᴀɴ ᴜɴᴇxᴘᴇᴄᴛᴇᴅ ᴇʀʀᴏʀ."))
+        return
+
+
 
     await message.reply(
       small_caps_bold(f"sᴜᴄᴄᴇssғᴜʟʟʏ sᴇɴᴛ {amount:.1f} ʟᴄ ᴛᴏ {recipient.first_name or recipient.username}!\n") +
