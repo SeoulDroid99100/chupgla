@@ -40,11 +40,11 @@ for module_name in ALL_MODULES:
 # Start task
 
 
-async def main() -> None:
+def main() -> None:
     """Run bot."""
     application.run_polling(drop_pending_updates=True)
-    await initialize_rank_db()  # Call both initialization functions
-    await initialize_loan_db()
+    initialize_rank_db()  # Call both initialization functions
+    initialize_loan_db()
     shivuu.loop.create_task(periodic_rank_updates())  # Start the tasks
     shivuu.loop.create_task(periodic_loan_checks())
 
@@ -52,5 +52,5 @@ if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start() 
     shivuu.start()
     LOGGER.info("Bot started")
-    await main()
+    main()
 
