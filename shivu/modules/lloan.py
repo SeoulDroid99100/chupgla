@@ -111,7 +111,7 @@ async def _show_main_menu(client, message, user_data=None):
     if not user_data:
         text = small_caps_bold("⌧ ᴀᴄᴄᴏᴜɴᴛ ɴᴏᴛ ғᴏᴜɴᴅ! ᴜsᴇ /ʟsᴛᴀʀᴛ ᴛᴏ ʀᴇɢɪsᴛᴇʀ.")
         if isinstance(message, Message):
-            await message.reply(text)
+            await message.reply(text)  # Initial command sends a new message
         else:
             await message.edit_text(text)
         return False
@@ -122,10 +122,14 @@ async def _show_main_menu(client, message, user_data=None):
     ]
     keyboard = InlineKeyboardMarkup(buttons)
     text = small_caps_bold("ʟᴏᴀɴ sʏsᴛᴇᴍ")
-    if isinstance(message, Message):
-        await message.reply(text, reply_markup=keyboard)
-    else:
-        await message.edit_text(text, reply_markup=keyboard)
+    try:
+        if isinstance(message, Message):
+            await message.reply(text, reply_markup=keyboard)  # Only initial command replies
+        else:
+            await message.edit_text(text, reply_markup=keyboard)  # All callbacks edit
+    except Exception as e:
+        logger.error(f"Error in _show_main_menu: {e}")
+        return False
     return True
 
 @shivuu.on_message(filters.command("lloan"))
@@ -168,156 +172,165 @@ async def loan_callbacks(client: shivuu, callback_query):
     user_id = callback_query.from_user.id
     user_data = await xy.find_one({"user_id": user_id})
 
-    if action == "main":
-        success = await _show_main_menu(client, callback_query.message, user_data)
-        if not success:
-            await callback_query.answer(small_caps_bold("⌧ ᴀᴄᴄᴏᴜɴᴛ ɴᴏᴛ ғᴏᴜɴᴅ!"), show_alert=True)
-        await callback_query.answer()
-        return
-
-    if not user_data:
-        await callback_query.edit_message_text(
-            small_caps_bold("⌧ ᴀᴄᴄᴏᴜɴᴛ ɴᴏᴛ ғᴏᴜɴᴅ! ᴜsᴇ /ʟsᴛᴀʀᴛ ᴛᴏ ʀᴇɢɪsᴛᴇʀ."),
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« ʙᴀᴄᴋ", callback_data="loan_main")]])
-        )
-        await callback_query.answer()
-        return
-
-    if action == "status":
-        page = int(parts[2]) if len(parts) > 2 else 0
-        await show_loan_status(client, callback_query.message, user_data, page)
-        await callback_query.answer()
-        return
-
-    elif action == "new":
-        if len(user_data.get("loans", [])) >= LOAN_CONFIG["max_active_loans"]:
-            await callback_query.answer(small_caps_bold("⌧ ᴍᴀx ᴀᴄᴛɪᴠᴇ ʟᴏᴀɴs ʀᴇᴀᴄʜᴇᴅ!"), show_alert=True)
+    try:
+        if action == "main":
+            success = await _show_main_menu(client, callback_query.message, user_data)
+            if not success:
+                await callback_query.answer(small_caps_bold("⌧ ᴀᴄᴄᴏᴜɴᴛ ɴᴏᴛ ғᴏᴜɴᴅ!"), show_alert=True)
+            await callback_query.answer()
             return
-        loan_limit = await get_user_loan_limit(user_data)
-        buttons = []
-        for tier_id, tier_data in LOAN_TIERS.items():
-            amount = min(loan_limit * tier_data["borrow_limit_mult"], LOAN_CONFIG["max_loan_base"])
-            total_repayment, _ = await calculate_repayment(amount, tier_id, user_data["progression"]["current_league"])
-            button_text = f"{tier_id} - {amount:.1f}ʟᴄ (ʀᴇᴘᴀʏ: {total_repayment:.1f}ʟᴄ)"
-            buttons.append([InlineKeyboardButton(button_text, callback_data=f"loan_amount_{tier_id}_{amount:.1f}")])
-        buttons.append([InlineKeyboardButton("« ʙᴀᴄᴋ", callback_data="loan_main")])
-        await callback_query.edit_message_text(
-            f"{small_caps_bold('ɴᴇᴡ ʟᴏᴀɴ ᴏғғᴇʀs')}\n\n" +
-            f"{small_caps_bold('ᴍᴀx ᴀᴠᴀɪʟᴀʙʟᴇ:')} {loan_limit:.1f}ʟᴄ\n" +
-            f"{small_caps_bold('ᴄʜᴏᴏsᴇ ᴀ ʟᴏᴀɴ ᴛɪᴇʀ:')}",
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
-        await callback_query.answer()
-        return
 
-    elif action == "amount":
-        tier_id, amount = parts[2], float(parts[3])
-        if tier_id not in LOAN_TIERS:
-            await callback_query.answer(small_caps_bold("ɪɴᴠᴀʟɪᴅ ʟᴏᴀɴ ᴛɪᴇʀ!"), show_alert=True)
+        if not user_data:
+            await callback_query.edit_message_text(
+                small_caps_bold("⌧ ᴀᴄᴄᴏᴜɴᴛ ɴᴏᴛ ғᴏᴜɴᴅ! ᴜsᴇ /ʟsᴛᴀʀᴛ ᴛᴏ ʀᴇɢɪsᴛᴇʀ."),
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« ʙᴀᴄᴋ", callback_data="loan_main")]])
+            )
+            await callback_query.answer()
             return
-        total, due_date = await calculate_repayment(amount, tier_id, user_data["progression"]["current_league"])
-        await xy.update_one(
-            {"user_id": user_id},
-            {
-                "$push": {
-                    "loans": {
-                        "amount": amount,
-                        "total": total,
-                        "due_date": due_date,
-                        "issued_at": datetime.utcnow(),
-                        "tier": tier_id,
-                        "overdue_notified": False
-                    }
+
+        if action == "status":
+            page = int(parts[2]) if len(parts) > 2 else 0
+            await show_loan_status(client, callback_query.message, user_data, page)
+            await callback_query.answer()
+            return
+
+        elif action == "new":
+            if len(user_data.get("loans", [])) >= LOAN_CONFIG["max_active_loans"]:
+                await callback_query.answer(small_caps_bold("⌧ ᴍᴀx ᴀᴄᴛɪᴠᴇ ʟᴏᴀɴs ʀᴇᴀᴄʜᴇᴅ!"), show_alert=True)
+                return
+            loan_limit = await get_user_loan_limit(user_data)
+            buttons = []
+            for tier_id, tier_data in LOAN_TIERS.items():
+                amount = min(loan_limit * tier_data["borrow_limit_mult"], LOAN_CONFIG["max_loan_base"])
+                total_repayment, _ = await calculate_repayment(amount, tier_id, user_data["progression"]["current_league"])
+                button_text = f"{tier_id} - {amount:.1f}ʟᴄ (ʀᴇᴘᴀʏ: {total_repayment:.1f}ʟᴄ)"
+                buttons.append([InlineKeyboardButton(button_text, callback_data=f"loan_amount_{tier_id}_{amount:.1f}")])
+            buttons.append([InlineKeyboardButton("« ʙᴀᴄᴋ", callback_data="loan_main")])
+            await callback_query.edit_message_text(
+                f"{small_caps_bold('ɴᴇᴡ ʟᴏᴀɴ ᴏғғᴇʀs')}\n\n" +
+                f"{small_caps_bold('ᴍᴀx ᴀᴠᴀɪʟᴀʙʟᴇ:')} {loan_limit:.1f}ʟᴄ\n" +
+                f"{small_caps_bold('ᴄʜᴏᴏsᴇ ᴀ ʟᴏᴀɴ ᴛɪᴇʀ:')}",
+                reply_markup=InlineKeyboardMarkup(buttons)
+            )
+            await callback_query.answer()
+            return
+
+        elif action == "amount":
+            tier_id, amount = parts[2], float(parts[3])
+            if tier_id not in LOAN_TIERS:
+                await callback_query.answer(small_caps_bold("ɪɴᴠᴀʟɪᴅ ʟᴏᴀɴ ᴛɪᴇʀ!"), show_alert=True)
+                return
+            total, due_date = await calculate_repayment(amount, tier_id, user_data["progression"]["current_league"])
+            await xy.update_one(
+                {"user_id": user_id},
+                {
+                    "$push": {
+                        "loans": {
+                            "amount": amount,
+                            "total": total,
+                            "due_date": due_date,
+                            "issued_at": datetime.utcnow(),
+                            "tier": tier_id,
+                            "overdue_notified": False
+                        }
+                    },
+                    "$inc": {"economy.wallet": amount}
                 },
-                "$inc": {"economy.wallet": amount}
-            },
-            upsert=True
-        )
-        await callback_query.edit_message_text(
-            small_caps_bold("✅ ʟᴏᴀɴ ᴀᴘᴘʀᴏᴠᴇᴅ!\n\n") +
-            f"💵 Received: {amount:.1f}ʟᴄ\n📅 Repay {total:.1f}ʟᴄ by {due_date.strftime('%Y-%m-%d %H:%M')}",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« ʙᴀᴄᴋ", callback_data="loan_main")]])
-        )
-        await callback_query.answer()
-        return
-
-    elif action == "repay":
-        page = int(parts[2]) if len(parts) > 2 else 0
-        active_loans = user_data.get("loans", [])
-        total_loans = len(active_loans)
-        total_pages = (total_loans + 4) // 5
-        if total_loans == 0:
+                upsert=True
+            )
             await callback_query.edit_message_text(
-                small_caps_bold("ɴᴏ ᴀᴄᴛɪᴠᴇ ʟᴏᴀɴs"),
+                small_caps_bold("✅ ʟᴏᴀɴ ᴀᴘᴘʀᴏᴠᴇᴅ!\n\n") +
+                f"💵 Received: {amount:.1f}ʟᴄ\n📅 Repay {total:.1f}ʟᴄ by {due_date.strftime('%Y-%m-%d %H:%M')}",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« ʙᴀᴄᴋ", callback_data="loan_main")]])
             )
             await callback_query.answer()
             return
-        start = page * 5
-        end = min((page + 1) * 5, total_loans)
-        current_page_loans = active_loans[start:end]
-        buttons = [
-            [InlineKeyboardButton(
-                f"{i+1}. {loan['amount']:.1f}ʟᴄ (ʀᴇᴘᴀʏ {loan['total']:.1f}ʟᴄ)",
-                callback_data=f"loan_select_{start+i}"
-            )] for i, loan in enumerate(current_page_loans)
-        ]
-        nav_buttons = []
-        if page > 0:
-            nav_buttons.append(InlineKeyboardButton("« ᴘʀᴇᴠ", callback_data=f"loan_repay_{page-1}"))
-        if page < total_pages - 1:
-            nav_buttons.append(InlineKeyboardButton("ɴᴇxᴛ »", callback_data=f"loan_repay_{page+1}"))
-        buttons.append(nav_buttons if nav_buttons else [])
-        buttons.append([InlineKeyboardButton("« ʙᴀᴄᴋ", callback_data="loan_main")])
-        await callback_query.edit_message_text(
-            small_caps_bold("sᴇʟᴇᴄᴛ ʟᴏᴀɴ ᴛᴏ ʀᴇᴘᴀʏ:"),
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
-        await callback_query.answer()
-        return
 
-    elif action == "select":
-        loan_index = int(parts[2])
-        if loan_index >= len(user_data["loans"]):
-            await callback_query.answer(small_caps_bold("ɪɴᴠᴀʟɪᴅ ʟᴏᴀɴ sᴇʟᴇᴄᴛɪᴏɴ!"), show_alert=True)
-            return
-        loan = user_data["loans"][loan_index]
-        await callback_query.edit_message_text(
-            small_caps_bold("⚠️ ᴄᴏɴғɪʀᴍ ʀᴇᴘᴀʏᴍᴇɴᴛ ᴏғ") + f" {loan['total']:.1f}ʟᴄ?",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ ᴄᴏɴғɪʀᴍ", callback_data=f"loan_confirm_{loan_index}")],
-                [InlineKeyboardButton("❌ ᴄᴀɴᴄᴇʟ", callback_data="loan_repay_0")]
-            ])
-        )
-        await callback_query.answer()
-        return
-
-    elif action == "confirm":
-        loan_index = int(parts[2])
-        if loan_index >= len(user_data["loans"]):
-            await callback_query.answer(small_caps_bold("ɪɴᴠᴀʟɪᴅ ʟᴏᴀɴ sᴇʟᴇᴄᴛɪᴏɴ!"), show_alert=True)
-            return
-        loan = user_data["loans"][loan_index]
-        if user_data["economy"]["wallet"] < loan["total"]:
+        elif action == "repay":
+            page = int(parts[2]) if len(parts) > 2 else 0
+            active_loans = user_data.get("loans", [])
+            total_loans = len(active_loans)
+            total_pages = (total_loans + 4) // 5
+            if total_loans == 0:
+                await callback_query.edit_message_text(
+                    small_caps_bold("ɴᴏ ᴀᴄᴛɪᴠᴇ ʟᴏᴀɴs"),
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« ʙᴀᴄᴋ", callback_data="loan_main")]])
+                )
+                await callback_query.answer()
+                return
+            start = page * 5
+            end = min((page + 1) * 5, total_loans)
+            current_page_loans = active_loans[start:end]
+            buttons = [
+                [InlineKeyboardButton(
+                    f"{i+1}. {loan['amount']:.1f}ʟᴄ (ʀᴇᴘᴀʏ {loan['total']:.1f}ʟᴄ)",
+                    callback_data=f"loan_select_{start+i}"
+                )] for i, loan in enumerate(current_page_loans)
+            ]
+            nav_buttons = []
+            if page > 0:
+                nav_buttons.append(InlineKeyboardButton("« ᴘʀᴇᴠ", callback_data=f"loan_repay_{page-1}"))
+            if page < total_pages - 1:
+                nav_buttons.append(InlineKeyboardButton("ɴᴇxᴛ »", callback_data=f"loan_repay_{page+1}"))
+            buttons.append(nav_buttons if nav_buttons else [])
+            buttons.append([InlineKeyboardButton("« ʙᴀᴄᴋ", callback_data="loan_main")])
             await callback_query.edit_message_text(
-                small_caps_bold("⌧ ɪɴsᴜғғɪᴄɪᴇɴᴛ ғᴜɴᴅs!"),
+                small_caps_bold("sᴇʟᴇᴄᴛ ʟᴏᴀɴ ᴛᴏ ʀᴇᴘᴀʏ:"),
+                reply_markup=InlineKeyboardMarkup(buttons)
+            )
+            await callback_query.answer()
+            return
+
+        elif action == "select":
+            loan_index = int(parts[2])
+            if loan_index >= len(user_data["loans"]):
+                await callback_query.answer(small_caps_bold("ɪɴᴠᴀʟɪᴅ ʟᴏᴀɴ sᴇʟᴇᴄᴛɪᴏɴ!"), show_alert=True)
+                return
+            loan = user_data["loans"][loan_index]
+            await callback_query.edit_message_text(
+                small_caps_bold("⚠️ ᴄᴏɴғɪʀᴍ ʀᴇᴘᴀʏᴍᴇɴᴛ ᴏғ") + f" {loan['total']:.1f}ʟᴄ?",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("✅ ᴄᴏɴғɪʀᴍ", callback_data=f"loan_confirm_{loan_index}")],
+                    [InlineKeyboardButton("❌ ᴄᴀɴᴄᴇʟ", callback_data="loan_repay_0")]
+                ])
+            )
+            await callback_query.answer()
+            return
+
+        elif action == "confirm":
+            loan_index = int(parts[2])
+            if loan_index >= len(user_data["loans"]):
+                await callback_query.answer(small_caps_bold("ɪɴᴠᴀʟɪᴅ ʟᴏᴀɴ sᴇʟᴇᴄᴛɪᴏɴ!"), show_alert=True)
+                return
+            loan = user_data["loans"][loan_index]
+            if user_data["economy"]["wallet"] < loan["total"]:
+                await callback_query.edit_message_text(
+                    small_caps_bold("⌧ ɪɴsᴜғғɪᴄɪᴇɴᴛ ғᴜɴᴅs!"),
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« ʙᴀᴄᴋ", callback_data="loan_main")]])
+                )
+                await callback_query.answer()
+                return
+            await xy.update_one(
+                {"user_id": user_id},
+                {
+                    "$inc": {"economy.wallet": -loan["total"]},
+                    "$pull": {"loans": {"issued_at": loan["issued_at"]}}
+                }
+            )
+            await callback_query.edit_message_text(
+                small_caps_bold("✅ ʟᴏᴀɴ ʀᴇᴘᴀɪᴅ!\n") + f"💸 Amount: {loan['total']:.1f}ʟᴄ",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« ʙᴀᴄᴋ", callback_data="loan_main")]])
             )
             await callback_query.answer()
             return
-        await xy.update_one(
-            {"user_id": user_id},
-            {
-                "$inc": {"economy.wallet": -loan["total"]},
-                "$pull": {"loans": {"issued_at": loan["issued_at"]}}
-            }
-        )
+
+    except Exception as e:
+        logger.error(f"Error in loan_callbacks ({action}): {e}")
         await callback_query.edit_message_text(
-            small_caps_bold("✅ ʟᴏᴀɴ ʀᴇᴘᴀɪᴅ!\n") + f"💸 Amount: {loan['total']:.1f}ʟᴄ",
+            small_caps_bold("⚠️ ᴀɴ ᴇʀʀᴏʀ ᴏᴄᴄᴜʀʀᴇᴅ!"),
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« ʙᴀᴄᴋ", callback_data="loan_main")]])
         )
         await callback_query.answer()
-        return
 
 async def initialize_loan_db():
     await xy.create_index([("loans.due_date", 1)])
