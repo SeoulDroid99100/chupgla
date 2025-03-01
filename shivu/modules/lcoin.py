@@ -15,7 +15,7 @@ SEND_COOLDOWN = 60  # Seconds
 TRANSACTIONS_PER_PAGE = 10
 
 # --- MongoDB Connection (for Transactions) ---
-TRANSACTION_MONGO_URI = "mongodb+srv://Tbot:cLEZofvA7zLXPYBB@cluster0.cgldf.mongodb.net/?retryWrites=true&w=majority"
+TRANSACTION_MONGO_URI = "mongodb+srv://Tbot:cLEZofvA7zLXPYBB@cluster0.cgldf.mongodb.net/?retryWrites=true&w=majority"  # Replace with your URI
 TRANSACTION_DB_NAME = "telegram_transactions"
 TRANSACTION_COLLECTION_NAME = "transactions"
 
@@ -163,7 +163,7 @@ async def _build_history_response(client, transactions, page, total_pages):
         if counterpart_id:
             try:
                 counterpart_user = await client.get_users(counterpart_id)
-                counterpart_name = counterpart_user.username or counterpart_user.first_name
+                counterpart_name = counterpart_user.first_name or counterpart_user.username or str(counterpart_id)  # Handle missing username/firstname
             except Exception:
                 counterpart_name = str(counterpart_id)
         else:
@@ -255,7 +255,7 @@ async def send_coins(client: shivuu, message: Message):
         await message.reply(small_caps_bold("⌧ ᴀᴄᴄᴏᴜɴᴛ ɴᴏᴛ ғᴏᴜɴᴅ! ᴜsᴇ /ʟsᴛᴀʀᴛ ᴛᴏ ʀᴇɢɪsᴛᴇʀ."))
         return
 
-    # --- Cooldown Check (Re-implemented!) ---
+    # --- Cooldown Check ---
     last_send_time = sender_data.get("economy", {}).get("last_send_time")
     if last_send_time:
         time_since_last_send = datetime.utcnow() - last_send_time
@@ -303,52 +303,44 @@ async def send_coins(client: shivuu, message: Message):
     if not recipient_data:
         await message.reply(small_caps_bold("⌧ ʀᴇᴄɪᴘɪᴇɴᴛ ʜᴀs ɴᴏᴛ sᴛᴀʀᴛᴇᴅ ᴛʜᴇ ʙᴏᴛ."))
         return
-
-    if sender_data["economy"]["wallet"] < amount:
-        await message.reply(small_caps_bold("⌧ ɪɴsᴜғғɪᴄɪᴇɴᴛ ғᴜɴᴅs ɪɴ ʏᴏᴜʀ ᴡᴀʟʟᴇᴛ!"))
-        return
-     # --- Perform Transaction (using atomic updates) and correct client---
+    # --- Custom Transaction Logic (No Session) ---
     try:
-        async with await transaction_client.start_session() as session:  # Use transaction_client and await
-            async with session.start_transaction():
-                sender_update_result = await xy.update_one(
-                    {"user_id": sender_id, "economy.wallet": {"$gte": amount}},
-                    {"$inc": {"economy.wallet": -amount}},
-                    session=session
-                )
-                recipient_update_result = await xy.update_one(
-                    {"user_id": recipient_id},
-                    {"$inc": {"economy.wallet": amount}},
-                    session=session
-                )
+        # 1. Deduct from sender (atomic conditional update)
+        sender_update = await xy.update_one(
+            {"user_id": sender_id, "economy.wallet": {"$gte": amount}},
+            {"$inc": {"economy.wallet": -amount}}
+        )
 
-                if sender_update_result.modified_count == 0 or recipient_update_result.modified_count == 0:
-                    await session.abort_transaction()
-                    await message.reply(small_caps_bold("⌧ ᴛʀᴀɴsᴀᴄᴛɪᴏɴ ғᴀɪʟᴇᴅ. ᴘʟᴇᴀsᴇ ᴛʀʏ ᴀɢᴀɪɴ."))
-                    return
+        if sender_update.modified_count == 0:
+            await message.reply(small_caps_bold("⌧ ᴛʀᴀɴsᴀᴄᴛɪᴏɴ ғᴀɪʟᴇᴅ. ɪɴsᴜғғɪᴄɪᴇɴᴛ ғᴜɴᴅs ᴏʀ ᴇʀʀᴏʀ!"))
+            return
 
-                # Log to the separate transactions DB
-                await log_transaction(sender_id, recipient_id, amount, "send")
-                await log_transaction(recipient_id, sender_id, amount, "receive")
+        # 2. Add to recipient (assumed to succeed if they exist)
+        recipient_update = await xy.update_one(
+            {"user_id": recipient_id},
+            {"$inc": {"economy.wallet": amount}}
+        )
+        if recipient_update.modified_count == 0:  #Recipient should exist if we got here.
+           await message.reply("Recipient error.")
+           return
 
-                # Update last send time (INSIDE the transaction)
-                await xy.update_one(
-                    {"user_id": sender_id},
-                    {"$set": {"economy.last_send_time": datetime.utcnow()}},
-                    session=session
-                )
-    except TypeError as e:
-        logger.error(f"TypeError in transaction: {e}")
-        await message.reply(small_caps_bold("⌧ ᴛʀᴀɴsᴀᴄᴛɪᴏɴ ғᴀɪʟᴇᴅ. ᴘʟᴇᴀsᴇ ᴛʀʏ ᴀɢᴀɪɴ (ᴛʏᴘᴇ ᴇʀʀᴏʀ)."))
-        return
+        # 3. Update timestamps and logs
+        await xy.update_one(
+            {"user_id": sender_id},
+            {"$set": {"economy.last_send_time": datetime.utcnow()}}
+        )
+
+        # 4. Log transactions
+        await log_transaction(sender_id, recipient_id, amount, "send")
+        await log_transaction(recipient_id, sender_id, amount, "receive")
+
     except Exception as e:
-        logger.exception(f"An unexpected error occurred during the transaction: {e}")
-        await message.reply(small_caps_bold("⌧ ᴛʀᴀɴsᴀᴄᴛɪᴏɴ ғᴀɪʟᴇᴅ ᴅᴜᴇ ᴛᴏ ᴀɴ ᴜɴᴇxᴘᴇᴄᴛᴇᴅ ᴇʀʀᴏʀ."))
+        logger.error(f"Transaction Error: {str(e)}")
+        await message.reply(small_caps_bold("⌧ ᴛʀᴀɴsᴀᴄᴛɪᴏɴ ғᴀɪʟᴇᴅ ᴅᴜᴇ ᴛᴏ sᴇʀᴠᴇʀ ᴇʀʀᴏʀ!"))
         return
 
-
-
+    # Success message
     await message.reply(
-      small_caps_bold(f"sᴜᴄᴄᴇssғᴜʟʟʏ sᴇɴᴛ {amount:.1f} ʟᴄ ᴛᴏ {recipient.first_name or recipient.username}!\n") +
-      small_caps_bold(f"ɴᴇᴡ ʙᴀʟᴀɴᴄᴇ: {sender_data['economy']['wallet'] - amount:.1f} ʟᴄ")
+        small_caps_bold(f"sᴜᴄᴄᴇssғᴜʟʟʏ sᴇɴᴛ {amount:.1f} ʟᴄ ᴛᴏ {recipient.first_name or recipient.username}!\n") +
+        small_caps_bold(f"ɴᴇᴡ ʙᴀʟᴀɴᴄᴇ: {sender_data['economy']['wallet'] - amount:.1f} ʟᴄ")
     )
