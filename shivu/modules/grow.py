@@ -106,6 +106,18 @@ async def calculate_percentage_smaller(user_id: int, current_size: float) -> flo
         raise
 
 
+def format_timedelta(delta: timedelta) -> str:
+    """Formats a timedelta to 'Xh Ym' or 'Ym Zs'."""
+    seconds = int(delta.total_seconds())
+    if seconds >= 3600:  # One hour or more
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+        return f"{hours}h {minutes}m"
+    else:  # Less than one hour
+        minutes = seconds // 60
+        seconds = seconds % 60
+        return f"{minutes}m {seconds}s"
+
 @shivuu.on_message(filters.command(["ltrain", "train", "lgrow", "grow"]))
 async def training_command(client: shivuu, message: Message):
     user_id = message.from_user.id
@@ -123,7 +135,7 @@ async def training_command(client: shivuu, message: Message):
             time_since_last_train = datetime.utcnow() - last_trained
             if time_since_last_train.total_seconds() < TRAINING_COOLDOWN:
                 remaining_cooldown = timedelta(seconds=TRAINING_COOLDOWN) - time_since_last_train
-                await message.reply(small_caps_bold(f"ᴛʀᴀɪɴɪɴɢ ɪs ᴏɴ ᴄᴏᴏʟᴅᴏᴡɴ. ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ {remaining_cooldown}."))
+                await message.reply(small_caps_bold(f"ᴛʀᴀɪɴɪɴɢ ɪs ᴏɴ ᴄᴏᴏʟᴅᴏᴡɴ. ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ {format_timedelta(remaining_cooldown)}."))
                 return
 
         # --- Difficulty Selection (Inline Keyboard) ---
@@ -169,7 +181,7 @@ async def training_callback(client: shivuu, callback_query):
             time_since_last_train = datetime.utcnow() - last_trained
             if time_since_last_train.total_seconds() < TRAINING_COOLDOWN:
                 remaining_cooldown = timedelta(seconds=TRAINING_COOLDOWN) - time_since_last_train
-                await callback_query.answer(small_caps_bold(f"ᴛʀᴀɪɴɪɴɢ ɪs ᴏɴ ᴄᴏᴏʟᴅᴏᴡɴ. ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ {remaining_cooldown}."), show_alert=True)
+                await callback_query.answer(small_caps_bold(f"ᴛʀᴀɪɴɪɴɢ ɪs ᴏɴ ᴄᴏᴏʟᴅᴏᴡɴ. ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ {format_timedelta(remaining_cooldown)}."), show_alert=True)
                 return
 
         # --- Perform Training ---
@@ -206,8 +218,11 @@ async def training_callback(client: shivuu, callback_query):
             rank, total_users = await get_ranking(user_id, new_size)
             percentage_smaller = await calculate_percentage_smaller(user_id, new_size)
 
-            next_train_time = datetime.utcnow() + timedelta(seconds=TRAINING_COOLDOWN)
-            next_train_str = next_train_time.strftime("%Hʜ %Mᴍ")  # Format as "Xh Ym"
+            # Calculate remaining cooldown *correctly*
+            time_since_last_train = datetime.utcnow() - user_data.get("progression", {}).get("last_trained")
+            remaining_cooldown = timedelta(seconds=TRAINING_COOLDOWN) - time_since_last_train
+            next_train_str = format_timedelta(remaining_cooldown)
+
 
         except Exception as e:
             logger.exception(f"Error during rank calculation: {e}")
