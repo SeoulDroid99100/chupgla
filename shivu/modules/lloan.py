@@ -111,7 +111,7 @@ async def _show_main_menu(client, message, user_data=None):
     if not user_data:
         text = small_caps_bold("⌧ ᴀᴄᴄᴏᴜɴᴛ ɴᴏᴛ ғᴏᴜɴᴅ! ᴜsᴇ /ʟsᴛᴀʀᴛ ᴛᴏ ʀᴇɢɪsᴛᴇʀ.")
         if isinstance(message, Message):
-            await message.reply(text)
+            await message.reply(text)  # Initial command needs a reply
         else:
             await message.edit_text(text)
         return False
@@ -123,9 +123,9 @@ async def _show_main_menu(client, message, user_data=None):
     keyboard = InlineKeyboardMarkup(buttons)
     text = small_caps_bold("ʟᴏᴀɴ sʏsᴛᴇᴍ")
     if isinstance(message, Message):
-        await message.reply(text, reply_markup=keyboard)
+        await message.reply(text, reply_markup=keyboard)  # Initial command reply
     else:
-        await message.edit_text(text, reply_markup=keyboard)
+        await message.edit_text(text, reply_markup=keyboard)  # Back button edits
     return True
 
 @shivuu.on_message(filters.command("lloan"))
