@@ -4,7 +4,7 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime, timedelta
 import random
 import asyncio
-import logging #
+import logging  #
 
 # --- Configuration ---
 LOAN_CONFIG = {
@@ -104,17 +104,21 @@ async def periodic_loan_checks():
             logger.exception(f"Error in periodic_loan_checks: {e}")
 
 # --- Command Handlers ---
-async def _show_main_menu(client, message, user_data=None):
+async def _show_main_menu(client, message, user_data=None, is_callback=False):
     user_id = message.from_user.id
     if user_data is None:
         user_data = await xy.find_one({"user_id": user_id})
     if not user_data:
         text = small_caps_bold("⌧ ᴀᴄᴄᴏᴜɴᴛ ɴᴏᴛ ғᴏᴜɴᴅ! ᴜsᴇ /ʟsᴛᴀʀᴛ ᴛᴏ ʀᴇɢɪsᴛᴇʀ.")
-        if isinstance(message, Message):
-            await message.reply(text)  # Initial command needs a reply
+        if is_callback:
+            await message.edit_text(
+                text,
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« ʙᴀᴄᴋ", callback_data="loan_main")]])
+            )
+            return True  # Prevent showing alert as message is edited
         else:
-            await message.edit_text(text)
-        return False
+            await message.reply(text)
+            return False
     buttons = [
         [InlineKeyboardButton("💵 ᴛᴀᴋᴇ ʟᴏᴀɴ", callback_data="loan_new")],
         [InlineKeyboardButton("💰 ʀᴇᴘᴀʏ", callback_data="loan_repay_0")],
@@ -122,15 +126,16 @@ async def _show_main_menu(client, message, user_data=None):
     ]
     keyboard = InlineKeyboardMarkup(buttons)
     text = small_caps_bold("ʟᴏᴀɴ sʏsᴛᴇᴍ")
-    if isinstance(message, Message):
-        await message.reply(text, reply_markup=keyboard)  # Initial command reply
+    if is_callback:
+        await message.edit_text(text, reply_markup=keyboard)
     else:
-        await message.edit_text(text, reply_markup=keyboard)  # Back button edits
+        await message.reply(text, reply_markup=keyboard)
     return True
 
 @shivuu.on_message(filters.command("lloan"))
 async def loan_handler(client: shivuu, message: Message):
-    await _show_main_menu(client, message)
+    await _show_main_menu(client, message, is_callback=False)
+
 
 async def _build_loan_list_response(loans, page, total_pages):
     response = [small_caps_bold("ᴀᴄᴛɪᴠᴇ ʟᴏᴀɴs") + f" (ᴘᴀɢᴇ {page+1}/{total_pages})\n"]
@@ -169,7 +174,7 @@ async def loan_callbacks(client: shivuu, callback_query):
     user_data = await xy.find_one({"user_id": user_id})
 
     if action == "main":
-        success = await _show_main_menu(client, callback_query.message, user_data)
+        success = await _show_main_menu(client, callback_query.message, user_data, is_callback=True)
         if not success:
             await callback_query.answer(small_caps_bold("⌧ ᴀᴄᴄᴏᴜɴᴛ ɴᴏᴛ ғᴏᴜɴᴅ!"), show_alert=True)
         await callback_query.answer()
