@@ -269,7 +269,7 @@ async def swap_buttons(client, callback):
     await refresh_rank(client, callback) #Function
 
 # --- Database Initialization ---
-async def initialize_db():
+async def initialize_rank_db():
     # Create necessary indexes
     await xy.create_index([("user_id", 1)], unique=True)  # Ensure user_id is unique
     await xy.create_index([("progression.lund_size", 1)])  # For ranking
