@@ -104,8 +104,9 @@ async def coin_handler(client: shivuu, message: Message):
     await _show_main_menu(client, message)
 
 
-async def _show_main_menu(client, message, is_callback=False):
-    user_id = message.from_user.id
+async def _show_main_menu(client, message, user_id=None, is_callback=False):
+    if user_id is None:
+        user_id = message.from_user.id  # Default to message's user if not provided
     user_data = await get_user_data(user_id)
 
     if not user_data:
@@ -120,8 +121,6 @@ async def _show_main_menu(client, message, is_callback=False):
     ])
 
     if is_callback:
-        if user_data:  # Only update if the user exists.
-             text = small_caps_bold("ʟᴀᴜᴅᴀᴄᴏɪɴ ʙᴀɴᴋɪɴɢ sʏsᴛᴇᴍ") + "\n\n" + small_caps_bold("ᴄʜᴏᴏsᴇ ᴀɴ ᴏᴘᴛɪᴏɴ:")
         await message.edit_text(text, reply_markup=buttons)
     else:
         await message.reply(text, reply_markup=buttons)
@@ -223,17 +222,17 @@ async def show_send_menu(client, message):
 @shivuu.on_callback_query(filters.regex(r"^coin_(balance|history|main|send)(?:_(\d+))?$"))
 async def handle_coin_buttons(client: shivuu, callback_query):
     action = callback_query.data.split("_")[1]
-    user_id = callback_query.from_user.id
+    user_id = callback_query.from_user.id  # Correct user ID
     user_data = await get_user_data(user_id)
 
-    # Even for callbacks, check user data and offer a way back.
-    if not user_data and action != "main":  # Don't show error on "main"
+    # Handle cases where user data isn't found (except for 'main' action)
+    if not user_data and action != "main":
         await callback_query.answer(small_caps_bold("⌧ ᴀᴄᴄᴏᴜɴᴛ ɴᴏᴛ ғᴏᴜɴᴅ! ᴜsᴇ /ʟsᴛᴀʀᴛ ᴛᴏ ʀᴇɢɪsᴛᴇʀ."), show_alert=True)
-        await _show_main_menu(client, callback_query.message, is_callback=True) # Go back to main menu
+        await _show_main_menu(client, callback_query.message, user_id=user_id, is_callback=True)
         return
 
     if action == "main":
-        await _show_main_menu(client, callback_query.message, is_callback=True)
+        await _show_main_menu(client, callback_query.message, user_id=user_id, is_callback=True)
     elif action == "balance":
         await show_balance(client, callback_query.message, user_data)
     elif action == "history":
@@ -310,7 +309,7 @@ async def send_coins(client: shivuu, message: Message):
         return
      # --- Perform Transaction (using atomic updates) and correct client---
     try:
-        async with transaction_client.start_session() as session:  # Use transaction_client
+        async with await transaction_client.start_session() as session:  # Use transaction_client and await
             async with session.start_transaction():
                 sender_update_result = await xy.update_one(
                     {"user_id": sender_id, "economy.wallet": {"$gte": amount}},
