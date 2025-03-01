@@ -187,26 +187,27 @@ async def training_callback(client: shivuu, callback_query):
         # --- Perform Training ---
         try:
             growth = await calculate_growth(difficulty)
+            current_time = datetime.utcnow()  # Capture the exact time of update
+
             if growth > 0:
                 new_size = round(user_data["progression"]["lund_size"] + growth, 2)
                 update_data = {
                     "$set": {
                         "progression.lund_size": new_size,
-                        "progression.last_trained": datetime.utcnow(),
+                        "progression.last_trained": current_time,  # Use current_time
                     },
                 }
-                result_message = f"🗿 **ɢʀᴏᴡᴛʜ:** +**{growth}**ᴄᴍ 📈\n" # Indicate successful growth
+                result_message = f"🗿 **ɢʀᴏᴡᴛʜ:** +**{growth}**ᴄᴍ 📈\n"  # Indicate successful growth
             else:
                 new_size = user_data["progression"]["lund_size"]  # No change in size
                 update_data = {
                     "$set": {
-                        "progression.last_trained": datetime.utcnow(),
+                        "progression.last_trained": current_time,  # Use current_time
                     }
                 }
                 result_message = "❌ **ᴛʀᴀɪɴɪɴɢ ғᴀɪʟᴇᴅ!** ɴᴏ ɢʀᴏᴡᴛʜ ᴛʜɪs ᴛɪᴍᴇ. 🙁\n"
 
             await xy.update_one({"user_id": user_id}, update_data)
-
 
         except Exception as e:
             logger.exception(f"Error during training update: {e}")
@@ -215,14 +216,13 @@ async def training_callback(client: shivuu, callback_query):
 
         # --- Get Ranking and Percentage ---
         try:
-            rank, total_users = await get_ranking(user_id, new_size)
-            percentage_smaller = await calculate_percentage_smaller(user_id, new_size)
-
-            # Calculate remaining cooldown *correctly*
-            time_since_last_train = datetime.utcnow() - user_data.get("progression", {}).get("last_trained", datetime.utcnow()) # added default value
+            # Calculate remaining cooldown *correctly* AFTER database update.
+            time_since_last_train = datetime.utcnow() - current_time
             remaining_cooldown = timedelta(seconds=TRAINING_COOLDOWN) - time_since_last_train
             next_train_str = format_timedelta(remaining_cooldown)
 
+            rank, total_users = await get_ranking(user_id, new_size)
+            percentage_smaller = await calculate_percentage_smaller(user_id, new_size)
 
         except Exception as e:
             logger.exception(f"Error during rank calculation: {e}")
