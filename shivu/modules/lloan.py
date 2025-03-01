@@ -104,16 +104,17 @@ async def periodic_loan_checks():
             logger.exception(f"Error in periodic_loan_checks: {e}")
 
 # --- Command Handlers ---
-async def _show_main_menu(client, message):
+async def _show_main_menu(client, message, user_data=None):
     user_id = message.from_user.id
-    user_data = await xy.find_one({"user_id": user_id})
+    if user_data is None:
+        user_data = await xy.find_one({"user_id": user_id})
     if not user_data:
         text = small_caps_bold("⌧ ᴀᴄᴄᴏᴜɴᴛ ɴᴏᴛ ғᴏᴜɴᴅ! ᴜsᴇ /ʟsᴛᴀʀᴛ ᴛᴏ ʀᴇɢɪsᴛᴇʀ.")
         if isinstance(message, Message):
             await message.reply(text)
         else:
             await message.edit_text(text)
-        return
+        return False
     buttons = [
         [InlineKeyboardButton("💵 ᴛᴀᴋᴇ ʟᴏᴀɴ", callback_data="loan_new")],
         [InlineKeyboardButton("💰 ʀᴇᴘᴀʏ", callback_data="loan_repay_0")],
@@ -125,6 +126,7 @@ async def _show_main_menu(client, message):
         await message.reply(text, reply_markup=keyboard)
     else:
         await message.edit_text(text, reply_markup=keyboard)
+    return True
 
 @shivuu.on_message(filters.command("lloan"))
 async def loan_handler(client: shivuu, message: Message):
@@ -156,7 +158,7 @@ async def show_loan_status(client, message, user_data, page=0):
     if page < total_pages - 1:
         buttons.append(InlineKeyboardButton("ɴᴇxᴛ »", callback_data=f"loan_status_{page + 1}"))
     buttons.append(InlineKeyboardButton("« ʙᴀᴄᴋ", callback_data="loan_main"))
-    reply_markup = InlineKeyboardMarkup([buttons] if len(buttons) == 1 else [buttons[:2], buttons[2:]])
+    reply_markup = InlineKeyboardMarkup([buttons] if len(buttons) == 1 else [buttons[:2], [buttons[2]]])
     await message.edit_text(response_text, reply_markup=reply_markup)
 
 @shivuu.on_callback_query(filters.regex(r"^loan_(main|new|amount|status|repay|select|confirm)_?([a-zA-Z0-9\.]+)?_?([\d\.]+)?$"))
@@ -165,16 +167,23 @@ async def loan_callbacks(client: shivuu, callback_query):
     action = parts[1]
     user_id = callback_query.from_user.id
     user_data = await xy.find_one({"user_id": user_id})
-    if not user_data:
-        await callback_query.answer(small_caps_bold("⌧ ᴀᴄᴄᴏᴜɴᴛ ɴᴏᴛ ғᴏᴜɴᴅ! ᴜsᴇ /ʟsᴛᴀʀᴛ ᴛᴏ ʀᴇɢɪsᴛᴇʀ."), show_alert=True)
-        return
 
     if action == "main":
-        await _show_main_menu(client, callback_query.message)
+        success = await _show_main_menu(client, callback_query.message, user_data)
+        if not success:
+            await callback_query.answer(small_caps_bold("⌧ ᴀᴄᴄᴏᴜɴᴛ ɴᴏᴛ ғᴏᴜɴᴅ!"), show_alert=True)
         await callback_query.answer()
         return
 
-    elif action == "status":
+    if not user_data:
+        await callback_query.edit_message_text(
+            small_caps_bold("⌧ ᴀᴄᴄᴏᴜɴᴛ ɴᴏᴛ ғᴏᴜɴᴅ! ᴜsᴇ /ʟsᴛᴀʀᴛ ᴛᴏ ʀᴇɢɪsᴛᴇʀ."),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« ʙᴀᴄᴋ", callback_data="loan_main")]])
+        )
+        await callback_query.answer()
+        return
+
+    if action == "status":
         page = int(parts[2]) if len(parts) > 2 else 0
         await show_loan_status(client, callback_query.message, user_data, page)
         await callback_query.answer()
@@ -193,7 +202,9 @@ async def loan_callbacks(client: shivuu, callback_query):
             buttons.append([InlineKeyboardButton(button_text, callback_data=f"loan_amount_{tier_id}_{amount:.1f}")])
         buttons.append([InlineKeyboardButton("« ʙᴀᴄᴋ", callback_data="loan_main")])
         await callback_query.edit_message_text(
-            f"{small_caps_bold('ɴᴇᴡ ʟᴏᴀɴ ᴏғғᴇʀs')}\n\n{max_loan:.1f}ʟᴄ\nᴄʜᴏᴏsᴇ ᴀ ʟᴏᴀɴ ᴛɪᴇʀ:",
+            f"{small_caps_bold('ɴᴇᴡ ʟᴏᴀɴ ᴏғғᴇʀs')}\n\n" +
+            f"{small_caps_bold('ᴍᴀx ᴀᴠᴀɪʟᴀʙʟᴇ:')} {loan_limit:.1f}ʟᴄ\n" +
+            f"{small_caps_bold('ᴄʜᴏᴏsᴇ ᴀ ʟᴏᴀɴ ᴛɪᴇʀ:')}",
             reply_markup=InlineKeyboardMarkup(buttons)
         )
         await callback_query.answer()
@@ -275,7 +286,7 @@ async def loan_callbacks(client: shivuu, callback_query):
             small_caps_bold("⚠️ ᴄᴏɴғɪʀᴍ ʀᴇᴘᴀʏᴍᴇɴᴛ ᴏғ") + f" {loan['total']:.1f}ʟᴄ?",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("✅ ᴄᴏɴғɪʀᴍ", callback_data=f"loan_confirm_{loan_index}")],
-                [InlineKeyboardButton("❌ ᴄᴀɴᴄᴇʟ", callback_data=f"loan_repay_0")]
+                [InlineKeyboardButton("❌ ᴄᴀɴᴄᴇʟ", callback_data="loan_repay_0")]
             ])
         )
         await callback_query.answer()
