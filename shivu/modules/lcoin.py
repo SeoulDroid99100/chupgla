@@ -120,6 +120,8 @@ async def _show_main_menu(client, message, is_callback=False):
     ])
 
     if is_callback:
+        if user_data:  # Only update if the user exists.
+             text = small_caps_bold("ʟᴀᴜᴅᴀᴄᴏɪɴ ʙᴀɴᴋɪɴɢ sʏsᴛᴇᴍ") + "\n\n" + small_caps_bold("ᴄʜᴏᴏsᴇ ᴀɴ ᴏᴘᴛɪᴏɴ:")
         await message.edit_text(text, reply_markup=buttons)
     else:
         await message.reply(text, reply_markup=buttons)
@@ -306,10 +308,9 @@ async def send_coins(client: shivuu, message: Message):
     if sender_data["economy"]["wallet"] < amount:
         await message.reply(small_caps_bold("⌧ ɪɴsᴜғғɪᴄɪᴇɴᴛ ғᴜɴᴅs ɪɴ ʏᴏᴜʀ ᴡᴀʟʟᴇᴛ!"))
         return
-
-    # --- Perform Transaction (using atomic updates) ---
+     # --- Perform Transaction (using atomic updates) and correct client---
     try:
-        async with await transaction_client.start_session() as session:
+        async with transaction_client.start_session() as session:  # Use transaction_client
             async with session.start_transaction():
                 sender_update_result = await xy.update_one(
                     {"user_id": sender_id, "economy.wallet": {"$gte": amount}},
