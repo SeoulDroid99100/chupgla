@@ -52,5 +52,5 @@ if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start() 
     shivuu.start()
     LOGGER.info("Bot started")
-    main()
+    await main()
 
