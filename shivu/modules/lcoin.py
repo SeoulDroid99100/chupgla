@@ -4,13 +4,14 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime, timedelta
 import logging
 from typing import List, Dict, Tuple, Optional
+from motor.motor_asyncio import AsyncIOMotorClient  # Corrected import
 
 # --- Setup Logging ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # --- Constants ---
-SEND_COOLDOWN = 60  # Seconds  <-- Re-added!
+SEND_COOLDOWN = 60  # Seconds
 TRANSACTIONS_PER_PAGE = 10
 
 # --- MongoDB Connection (for Transactions) ---
@@ -18,7 +19,7 @@ TRANSACTION_MONGO_URI = "mongodb+srv://Tbot:cLEZofvA7zLXPYBB@cluster0.cgldf.mong
 TRANSACTION_DB_NAME = "telegram_transactions"
 TRANSACTION_COLLECTION_NAME = "transactions"
 
-transaction_client = AsyncIOMotorClient(TRANSACTION_MONGO_URI)
+transaction_client = AsyncIOMotorClient(TRANSACTION_MONGO_URI)  # Corrected: No await here
 transaction_db = transaction_client[TRANSACTION_DB_NAME]
 transaction_collection = transaction_db[TRANSACTION_COLLECTION_NAME]
 
@@ -31,7 +32,7 @@ try:
     print("Successfully connected to Transactions MongoDB (from lcoin.py)!")
 except Exception as e:
     print(f"Failed to connect to Transactions MongoDB (from lcoin.py): {e}")
-    exit(1)
+    exit(1)  # Exit if we can't connect!
 
 
 # --- Helper Functions ---
