@@ -1,5 +1,3 @@
-# shivu/modules/lrank.py
-
 from shivu import shivuu, xy
 from pyrogram import filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
@@ -25,25 +23,48 @@ DEFAULT_BUTTON_ORDER = ["📜 League Requirements", "🔄 Refresh"] #Default but
 
 #----UTIL----
 
-async def check_promotion(user_data: dict) -> tuple:
-    #----CHECK PROMOTION----
-    current_size = user_data["progression"]["lund_size"]
-    current_league = user_data["progression"]["current_league"]
+async def get_current_league(size: float) -> str:
+    """Determines the current league based on lund_size."""
+    for league in LEAGUES:
+        if league["min"] <= size <= league["max"]:
+            return league["name"]
+    return "Unknown League"  # Should not happen, but good for safety
 
-    # Find current league index
-    current_index = next((i for i, league in enumerate(LEAGUES) if league["name"] == current_league), 0)
+
+
+async def check_promotion_demotion(user_data: dict) -> tuple:
+    """Checks for promotion or demotion, handling edge cases.
+    Returns (status, new_league_name) where status is True (promotion),
+    False (demotion), or None (no change).
+    """
+    current_size = user_data["progression"]["lund_size"]
+    current_league_name = user_data["progression"]["current_league"]
+
+    current_league = next((league for league in LEAGUES if league["name"] == current_league_name), None)
+    if not current_league:
+        return None, None  # Should not happen with proper data
 
     # Check for promotion
-    if current_size > LEAGUES[current_index]["max"] and current_index < len(LEAGUES)-1:
-        return True, LEAGUES[current_index + 1]
+    if current_size > current_league["max"]:
+        next_league_index = LEAGUES.index(current_league) + 1
+        if next_league_index < len(LEAGUES):
+            return True, LEAGUES[next_league_index]["name"]
+        else:
+            return None, None  # Already in the highest league
 
     # Check for demotion
-    if current_size < LEAGUES[current_index]["min"] and current_size > 0:
-        return False, LEAGUES[current_index - 1]
+    elif current_size < current_league["min"]:
+        prev_league_index = LEAGUES.index(current_league) - 1
+        if prev_league_index >= 0:
+            return False, LEAGUES[prev_league_index]["name"]
+        else:
+            return None, None  # Already in the lowest league.
 
-    return None, None
+    return None, None  # No change
+
 
 async def get_progress_bar(current_size: float, league: dict) -> str:
+    """Generates a progress bar string."""
     #----PROGRESS BAR----
     progress = (current_size - league["min"]) / (league["max"] - league["min"]) * 100
     filled = '▰' * int(progress // 10)
@@ -78,81 +99,77 @@ async def create_buttons(user_id): #This function will create buttons to functio
 
 #----RANK UPDATES----
 
-async def update_rank(user_id):
-    #----UPDATE RANK FOR USER----
+async def update_rank(user_id: int) -> None:
+    """Updates the user's rank if necessary and sends a DM on change."""
     try:
-        user_data = await xy.find_one({"user_id": user_id}) #Get from the DB
-
-        if not user_data: #If not user in the database check and skip to not show error
+        user_data = await xy.find_one({"user_id": user_id})
+        if not user_data:
             return
 
-        current_league = user_data["progression"]["current_league"] #get respective data from variables
-        current_size = user_data["progression"]["lund_size"] #to not repeat commands, we create variables
+        # Check for promotion/demotion *before* any database updates
+        status, new_league_name = await check_promotion_demotion(user_data)
 
-        # Check for rank changes
-        status, new_league = await check_promotion(user_data) #Get the condition and if has new value
-        if status is not None: #check if has a variable in check variable the "status"
-            # Update league
-            await xy.update_one( #With the variable update one if that conditions are OK
-                {"user_id": user_id}, #Here we send the variables or data needs for function
-                {"$set": {"progression.current_league": new_league["name"]},
-                 "$push": {"progression.league_history": {
-                     "date": datetime.now(),
-                     "from": current_league,
-                     "to": new_league["name"]
-                 }}} #Get all functions we need to see and send
+        if status is not None:  # League change
+            old_league_name = user_data["progression"]["current_league"]
 
+            # Update the database
+            await xy.update_one(
+                {"user_id": user_id},
+                {
+                    "$set": {
+                        "progression.current_league": new_league_name,
+                        "progression.last_rank_update": datetime.utcnow(),  # Update timestamp
+                    },
+                    "$push": {
+                        "progression.league_history": {
+                            "date": datetime.utcnow(),
+                            "from": old_league_name,
+                            "to": new_league_name,
+                        }
+                    },
+                },
             )
 
-            # Build display of league updates
-            league_data = next((l for l in LEAGUES if l["name"] == current_league), LEAGUES[0]) #For function, check the file if its allright
-            progress_bar = await get_progress_bar(current_size, league_data) #Get function from other area for variables and create code
-            next_league = LEAGUES[LEAGUES.index(league_data) + 1] if LEAGUES.index(league_data) < len(
-                LEAGUES) - 1 else None #for create variable with functions of other area
-
-            # Build string
-            promotion_message = ( #with these variable build all what needs in code
-                "〄 **ʟᴇᴀɢᴜᴇ ᴜᴘᴅᴀᴛᴇ!** 〄\n\n" #all function for the bot, for send messages if some error happen you know how that can happen with the code
-                f"🏆 **{current_league}**\n\n"
-                f"📏 ᴄᴜʀʀᴇɴᴛ sɪᴢᴇ: {current_size:.1f}ᴄᴍ\n\n" #try to functions everything, variables, checks...
-                f"📊 ᴘʀᴏɢʀᴇss: {progress_bar}\n\n" #and always to has checks or try/exeptions
-                f"⭐ ɴᴇxᴛ ʟᴇᴀɢᴜᴇ: {next_league['name'] if next_league else 'ᴍᴀx ʀᴀɴᴋ'}\n" #and conditions
-                f"🎯 ʀᴇǫᴜɪʀᴇᴅ: {next_league['min'] if next_league else '∞'}ᴄᴍ" #to more clean the bot
-            )
-
-            # Send message directly to the user, remember that the function can be in other code file! and that works too, just import this!
-            try: #Check or skip if the message is not send
-                user = await shivuu.get_users(user_id)  # For sending the message
-                await shivuu.send_message( #try to send with the data collected of the user ID and create data for the new function
-                    chat_id=user_id, #With variables for each function
-                    text=promotion_message #to make better the bots, we try to set functions to that
+            # Send DM notification
+            try:
+                message = (
+                    f"🎉 League Update! You have {'moved up to' if status else 'been demoted to'} the {new_league_name}! 🎉"
                 )
+                await shivuu.send_message(user_id, message)
             except Exception as dm_e:
-                print(f"Error sending DM to user {user_id}: {dm_e}") #Log
-    except Exception as e: #Show errors is better, to look the functions
-        print(f"Error during update_rank for user {user_id}: {e}") #Log and prints with what you want
-#----PERIODIC TASKS----
-async def periodic_rank_updates(): #Use other async function that can be run and the main is not stuck with the problems
-    while True: #make sure that has some conditions
-        all_users = await xy.distinct("user_id") #Get other check functions
-        for user_id in all_users: #for check all conditions and all types
-            await update_rank(user_id) #if not print and contine without send
+                print(f"Error sending DM to user {user_id}: {dm_e}")
 
-        await asyncio.sleep(120)
+    except Exception as e:
+        print(f"Error during update_rank for user {user_id}: {e}")
+
+#----PERIODIC TASKS----
+async def periodic_rank_updates():
+    """Periodically checks for users whose rank might need updating."""
+    while True:
+        await asyncio.sleep(120)  # Check every 2 minutes
+        try:
+            # Find users whose lund_size has potentially changed since last update.
+            # This significantly improves efficiency.
+            now = datetime.utcnow()
+            users_to_update = await xy.find(
+                {
+                    "$or": [
+                        {"progression.last_rank_update": {"$lt": now}},  # Last update was before now
+                        {"progression.last_rank_update": {"$exists": False}},  # Never updated
+                    ]
+                }
+            ).to_list(length=None)  # Fetch all matching users
+
+            for user_data in users_to_update:
+                await update_rank(user_data["user_id"])  # Pass user_id
+
+        except Exception as e:
+            print(f"Error in periodic_rank_updates: {e}")
+
+
 
 #----COMMANDS----
 
-task = None
-
-@shivuu.on_message(filters.command("ctask")) #Task commands
-async def starttask(client: shivuu, message: Message): #For start the funcions
-    #----START TASK COMMAND----
-    global task
-    if task is None: #Task condition to check
-        task = shivuu.loop.create_task(periodic_rank_updates()) #The functions
-        await message.reply("task create, if did not work try restart bot to run task") #send it
-    else:
-        await message.reply("task is alright and running no problems")#and or print
 
 @shivuu.on_message(filters.command("lrank")) #Command for Lrank
 async def rank_handler(client: shivuu, message: Message): #the file with functions
@@ -251,3 +268,9 @@ async def swap_buttons(client, callback):
     # Refresh lrank output
     await refresh_rank(client, callback) #Function
 
+# --- Database Initialization ---
+async def initialize_db():
+    # Create necessary indexes
+    await xy.create_index([("user_id", 1)], unique=True)  # Ensure user_id is unique
+    await xy.create_index([("progression.lund_size", 1)])  # For ranking
+    await xy.create_index([("progression.last_rank_update", 1)]) #for periodic updates
