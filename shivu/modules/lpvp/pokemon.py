@@ -46,30 +46,26 @@ class Pokemon(Item):
         self.status = []
         self.next_move = None
         self.stages = Stages(**{stat_name: 0 for stat_name in STAT_NAMES})
-        self.opp = None  # Initialize opp
+        self.critical = NORMAL_CRITICAL # Set initial critical
 
         for stat_name in STAT_NAMES:
             basic_stat = getattr(self, stat_name)
             setattr(self, 'basic_' + stat_name, basic_stat)
             self.__dict__[stat_name] = self.compute_stat(stat_name, basic_stat)
-            
-        self.max_hp = self.hp
-        
-        if 'moves' in self.__dict__:
-            self._moves = []
-            for move_data in self.moves:
-                move = self.create_move(move_data)
-                if move:
-                    self._moves.append(move)
 
-    def create_move(self, move_data):
-        move_module = importlib.import_module("shivu.modules.lpvp.move")
-        return move_module.Move(user=self, **move_data)
+        self.max_hp = self.hp
+
+        # Access moves directly (they are now instances of Move)
+        self._moves = self.moves
+        if self._moves:
+            for move in self._moves:
+                move.user = self # Set user
+                
 
     def bind_opp(self, opp):
         self.opp = opp
         for move in self._moves:
-            move.bind_opp(opp)
+            move.opp = opp  # Bind opponent to the *Move* instance
 
     def add_status(self, status_name, *arg, **kwargs):
         status_module = importlib.import_module("shivu.modules.lpvp.status")
@@ -86,31 +82,31 @@ class Pokemon(Item):
         elif status_name == 'burn':
             if any(s in self.status for s in ['burn', 'sleep', 'paralyse', 'poison', 'bad_poison', 'freeze']):
                 append_condition = False
-            elif 'Fire' in self.type:  # Add Type
+            elif 'Fire' in self.type:
                 append_condition = False
 
         elif status_name == 'paralyse':
             if any(s in self.status for s in ['burn', 'sleep', 'paralyse', 'poison', 'bad_poison', 'freeze']):
                 append_condition = False
-            elif 'Electric' in self.type:  # Add Type
+            elif 'Electric' in self.type:
                 append_condition = False
 
         elif status_name == 'poison':
             if any(s in self.status for s in ['burn', 'sleep', 'paralyse', 'poison', 'bad_poison', 'freeze']):
                 append_condition = False
-            elif 'Poison' in self.type or 'Steel' in self.type:  # Add Type
+            elif 'Poison' in self.type or 'Steel' in self.type:
                 append_condition = False
 
         elif status_name == 'bad_poison':
             if any(s in self.status for s in ['burn', 'sleep', 'paralyse', 'poison', 'bad_poison', 'freeze']):
                 append_condition = False
-            elif 'Poison' in self.type or 'Steel' in self.type:  # Add Type
+            elif 'Poison' in self.type or 'Steel' in self.type:
                 append_condition = False
 
         elif status_name == 'freeze':
             if any(s in self.status for s in ['burn', 'sleep', 'paralyse', 'poison', 'bad_poison', 'freeze']):
                 append_condition = False
-            elif 'Ice' in self.type:  # Add Type
+            elif 'Ice' in self.type:
                 append_condition = False
 
         elif status_name == 'leech_seed':
