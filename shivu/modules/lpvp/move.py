@@ -13,14 +13,13 @@ class Move:
         self.user = user
         self.name = name
         self.opp = None # Opponent will be set during battle.
-        self.__dict__.update(kwargs)  # Add all move properties (power, type, etc.)
-        self.max_pp = self.pp # Store Max PP
-
+        self.pp = kwargs.get('pp', 0)         # Current PP, defaults to 0
+        self.max_pp = kwargs.get('pp', 0)     # Max PP, defaults to 0. Gets from same 'pp' value
+        self.__dict__.update(kwargs)          # Add all other move properties
 
     def __repr__(self):
         # Improved __repr__ for better display during move selection
-        return f"{self.name} (Type: {self.type}, Category: {self.category}, Power: {self.power}, Accuracy: {self.accuracy*100}%)"
-
+        return f"{self.name} (Type: {self.type}, Category: {self.category}, Power: {self.power}, Accuracy: {self.accuracy*100}%, PP: {self.pp}/{self.max_pp})"
 
     def bind_opp(self, opp):
         self.opp = opp
@@ -31,7 +30,7 @@ class Move:
         # Load coef type
         base = importlib.import_module("shivu.modules.lpvp.base")
         coef_type = base.coef_type
-        
+
         if self.category == 'Physical':
             A = self.user.attack
             D = target.defense
@@ -61,7 +60,7 @@ class Move:
 
         # Burn modifier (if applicable)
         burn_modifier = 0.5 if 'burn' in self.user.status and self.category == 'Physical' else 1
-        
+
         # Random variation
         random_mod = random.uniform(0.85, 1)
 
@@ -76,7 +75,7 @@ class Move:
         """Applies the move's effects (damage, status, etc.) to the target."""
         if not self.opp:
             raise ValueError("Opponent not bound to move!")
-        
+
         # --- Move Specific Logic ---
         if self.name == "Curse":
             self.user.stages.attack += 1
@@ -84,23 +83,27 @@ class Move:
             self.user.stages.speed -= 1
             print(f"{self.user.player[1]}'s {self.user.name}'s Attack and Defense rose!")
             print(f"{self.user.player[1]}'s {self.user.name}'s Speed fell!")
+            self.pp -= 1 # Decrease pp.
             return # No damage
 
         if self.name == "Rest":
             self.user.hp = self.user.max_hp
             self.user.add_status('sleep', t_sleep = 3)
             print(f"{self.user.player[1]}'s {self.user.name} went to sleep and became healthy!")
+            self.pp -= 1
             return # No damage
-        
+
         if self.name == "Swords_Dance":
             self.user.stages.attack += 2
             print(f"{self.user.player[1]}'s {self.user.name}'s Attack rose sharply!")
+            self.pp -= 1
             return # No damage
 
         if self.name == "Dragon_Dance":
             self.user.stages.attack += 1
             self.user.stages.speed += 1
             print(f"{self.user.player[1]}'s {self.user.name}'s Attack and Speed rose!")
+            self.pp -= 1
             return
 
         if self.name == "Quiver_Dance":
@@ -108,42 +111,48 @@ class Move:
             self.user.stages.sp_def += 1
             self.user.stages.speed += 1
             print(f"{self.user.player[1]}'s {self.user.name}'s Sp_Atk, Sp_Def and Speed rose!")
+            self.pp -= 1
             return
-        
+
         if self.name == "Roost":
             self.user.hp += self.user.max_hp / 2
             if self.user.hp > self.user.max_hp: # Check if hp exeeded
                 self.user.hp = self.user.max_hp # Cap to max
             print(f"{self.user.player[1]}'s {self.user.name} has recovered some HP!")
+            self.pp -= 1
             return
-        
+
         if self.name == "Leech_Seed":
             target.add_status('leech_seed')
             if 'Grass' in target.type:
                 print(f"It didn't even affect {target.player[1]}'s {target.name} at all...")
                 print()
+            self.pp -= 1
             return
-        
+
         if self.name == "Will_O_Wisp":
             target.add_status('burn')
             if 'Fire' in target.type:
                 print(f"It didn't even affect {target.player[1]}'s {target.name} at all...")
                 print()
+            self.pp -= 1
             return
-        
+
         if self.name == "Toxic":
             target.add_status('bad_poison')
 
             if 'Poison' in target.type or 'Steel' in target.type:
                 print(f"It didn't even affect {target.player[1]}'s {target.name} at all...")
                 print()
+            self.pp -=1
             return
-        
+
         # --- If not a special case move, calculate damage ---
         if random.random() > self.accuracy:
                 print('The attack missed!')
                 print()
                 damage = 0
+                self.pp -= 1 # Decrease pp
                 return
         else:
             damage = self.calculate_damage(target)
@@ -151,6 +160,7 @@ class Move:
             if damage > 0:
                 print(f"{self.opp.player[1]}'s {self.opp.name} lost {damage} HP due to {self.user.player[1]}'s {self.user.name}'s {self.name}!")
                 print()
+            self.pp -= 1
 
         # --- Apply secondary effects after damage ---
         if damage > 0:
