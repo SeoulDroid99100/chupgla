@@ -3,6 +3,7 @@
 import json
 import importlib
 from .base import Item, STAT_NAMES, coef_stage
+#from .move import NORMAL_CRITICAL # Import Move object
 
 def stat(stat_name):
     """A property factory for Pokemon stats."""
@@ -46,26 +47,30 @@ class Pokemon(Item):
         self.status = []
         self.next_move = None
         self.stages = Stages(**{stat_name: 0 for stat_name in STAT_NAMES})
-        self.critical = NORMAL_CRITICAL # Set initial critical
-
+        self.critical = 0.04167  # Use a default critical hit rate.
+        
         for stat_name in STAT_NAMES:
             basic_stat = getattr(self, stat_name)
             setattr(self, 'basic_' + stat_name, basic_stat)
             self.__dict__[stat_name] = self.compute_stat(stat_name, basic_stat)
-
+            
         self.max_hp = self.hp
+        
+        if 'moves' in self.__dict__:
+            self._moves = []
+            for move_data in self.moves:
+                move = self.create_move(move_data)
+                if move:
+                    self._moves.append(move)
 
-        # Access moves directly (they are now instances of Move)
-        self._moves = self.moves
-        if self._moves:
-            for move in self._moves:
-                move.user = self # Set user
-                
+    def create_move(self, move_data):
+        move_module = importlib.import_module("shivu.modules.lpvp.move")
+        return move_module.Move(user=self, **move_data)
 
     def bind_opp(self, opp):
         self.opp = opp
         for move in self._moves:
-            move.opp = opp  # Bind opponent to the *Move* instance
+            move.opp = opp
 
     def add_status(self, status_name, *arg, **kwargs):
         status_module = importlib.import_module("shivu.modules.lpvp.status")
