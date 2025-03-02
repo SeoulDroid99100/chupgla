@@ -56,24 +56,32 @@ def create_pokemon(pokemon_name, player_id):
         else:
             print(f"ERROR: Could not find data for move: {move_name}")
             # Consider handling this more gracefully, e.g., skipping the move
-   
+
     # Create a dictionary for moves, with pp.
     modified_moves = []
     for move_name in data['moves']:  # Iterate over the *names*
         move_data_dict = loaded_moves.get(move_name)
-        if move_data_dict:  # Check if move data exists
+        if not move_data_dict:
+           print(f"ERROR: Move data for {move_name} not found in moves.json. Skipping.")
+           continue  # Skip this move entirely
+
+        try:
             modified_moves.append({
                 "name": move_name,  # Correctly use move_name (the key)
-                "power": move_data_dict['power'],
-                "type": move_data_dict['type'],
-                "category": move_data_dict['category'],
-                "accuracy": move_data_dict['accuracy'],
-                "priority": move_data_dict['priority'],
-                "pp": move_data_dict['pp'],
-                "max_pp": move_data_dict['pp'],
-                "description": move_data_dict['description']
+                "power": move_data_dict.get('power', 0),  # Use .get() with defaults
+                "type": move_data_dict.get('type', 'Normal'), # Default type
+                "category": move_data_dict.get('category', 'Status'), # Default Category
+                "accuracy": move_data_dict.get('accuracy', 1.0), # Default accuracy
+                "priority": move_data_dict.get('priority', 0),
+                "pp": move_data_dict.get('pp', 5),  # Default PP
+                "max_pp": move_data_dict.get('pp', 5),
+                "description": move_data_dict.get('description', '')
             })
-   
+        except KeyError as e:
+            print(f"ERROR: Move {move_name} missing key {e}. Skipping.")
+            continue  # Skip to the next move
+
+
     # Override pokemon moves
     data['moves'] = modified_moves
 
