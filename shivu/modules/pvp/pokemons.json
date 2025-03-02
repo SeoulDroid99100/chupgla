@@ -1,0 +1,322 @@
+{
+    "Snorlax": {
+        "type": [
+            "Normal"
+        ],
+        "hp": 160,
+        "attack": 110,
+        "defense": 65,
+        "sp_atk": 65,
+        "sp_def": 110,
+        "speed": 30,
+        "moves": [
+            "Curse",
+            "Body_Slam",
+            "Rest",
+            "Earthquake"
+        ]
+    },
+    "Lucario": {
+        "type": [
+            "Fighting",
+            "Steel"
+        ],
+        "hp": 70,
+        "attack": 110,
+        "defense": 70,
+        "sp_atk": 115,
+        "sp_def": 70,
+        "speed": 90,
+        "moves": [
+            "Swords_Dance",
+            "Meteor_Mash",
+            "Close_Combat",
+            "Bullet_Punch"
+        ]
+    },
+    "Salamence": {
+        "type": [
+            "Dragon",
+            "Flying"
+        ],
+        "hp": 95,
+        "attack": 135,
+        "defense": 80,
+        "sp_atk": 110,
+        "sp_def": 80,
+        "speed": 100,
+        "moves": [
+            "Dragon_Dance",
+            "Double_Edge",
+            "Dragon_Claw",
+            "Aerial_Ace"
+        ]
+    },
+    "Tentacruel": {
+        "type": [
+            "Water",
+            "Poison"
+        ],
+        "hp": 80,
+        "attack": 70,
+        "defense": 65,
+        "sp_atk": 80,
+        "sp_def": 120,
+        "speed": 100,
+        "moves": [
+            "Scald",
+            "Toxic",
+            "Sludge_Bomb",
+            "Dazzling_Gleam"
+        ]
+    },
+    "Rhyperior": {
+        "type": [
+            "Ground",
+            "Rock"
+        ],
+        "hp": 115,
+        "attack": 140,
+        "defense": 130,
+        "sp_atk": 55,
+        "sp_def": 55,
+        "speed": 40,
+        "moves": [
+            "Earthquake",
+            "Stone_Edge",
+            "Megahorn",
+            "Ice_Punch"
+        ]
+    },
+    "Tyranitar": {
+        "type": [
+            "Rock",
+            "Dark"
+        ],
+        "hp": 100,
+        "attack": 134,
+        "defense": 110,
+        "sp_atk": 95,
+        "sp_def": 100,
+        "speed": 61,
+        "moves": [
+            "Rock_Slide",
+            "Crunch",
+            "Earthquake",
+            "Fire_Punch"
+        ]
+    },
+    "Volcarona": {
+        "type": [
+            "Bug",
+            "Fire"
+        ],
+        "hp": 85,
+        "attack": 60,
+        "defense": 65,
+        "sp_atk": 135,
+        "sp_def": 105,
+        "speed": 100,
+        "moves": [
+            "Quiver_Dance",
+            "Flamethrower",
+            "Bug_Buzz",
+            "Roost"
+        ]
+    },
+    "Gengar": {
+        "type": [
+            "Ghost",
+            "Poison"
+        ],
+        "hp": 60,
+        "attack": 65,
+        "defense": 60,
+        "sp_atk": 130,
+        "sp_def": 75,
+        "speed": 110,
+        "moves": [
+            "Shadow_Ball",
+            "Sludge_Wave",
+            "Focus_Blast",
+            "Thunderbolt"
+        ]
+    },
+    "Charizard": {
+        "type": [
+            "Fire",
+            "Flying"
+        ],
+        "hp": 78,
+        "attack": 84,
+        "defense": 78,
+        "sp_atk": 109,
+        "sp_def": 85,
+        "speed": 100,
+        "moves": [
+            "Fire_Blast",
+            "Air_Slash",
+            "Dragon_Pulse",
+            "Focus_Blast"
+        ]
+    },
+    "Blastoise": {
+        "type": [
+            "Water"
+        ],
+        "hp": 79,
+        "attack": 83,
+        "defense": 100,
+        "sp_atk": 85,
+        "sp_def": 105,
+        "speed": 78,
+        "moves": [
+            "Dark_Pulse",
+            "Hydro_Pump",
+            "Ice_Beam",
+            "Aura_Sphere"
+        ]
+    },
+    "Venusaur": {
+        "type": [
+            "Grass",
+            "Poison"
+        ],
+        "hp": 80,
+        "attack": 82,
+        "defense": 83,
+        "sp_atk": 100,
+        "sp_def": 100,
+        "speed": 80,
+        "moves": [
+            "Leech_Seed",
+            "Sludge_Bomb",
+            "Leaf_Storm",
+            "Earthquake"
+        ]
+    },
+    "Electivire": {
+        "type": [
+            "Electric"
+        ],
+        "hp": 75,
+        "attack": 123,
+        "defense": 67,
+        "sp_atk": 95,
+        "sp_def": 85,
+        "speed": 95,
+        "moves": [
+            "Thunderbolt",
+            "Flamethrower",
+            "Earthquake",
+            "Ice_Punch"
+        ]
+    },
+    "Gardevoir": {
+        "type": [
+            "Psychic",
+            "Fairy"
+        ],
+        "hp": 68,
+        "attack": 65,
+        "defense": 65,
+        "sp_atk": 125,
+        "sp_def": 115,
+        "speed": 80,
+        "moves": [
+            "Psychic",
+            "Moonblast",
+            "Will_O_Wisp",
+            "Shadow_Ball"
+        ]
+    },
+    "Mamoswine": {
+        "type": [
+            "Ice",
+            "Ground"
+        ],
+        "hp": 110,
+        "attack": 130,
+        "defense": 80,
+        "sp_atk": 70,
+        "sp_def": 60,
+        "speed": 80,
+        "moves": [
+            "Ice_Shard",
+            "Icicle_Crash",
+            "Earthquake",
+            "Knock_Off"
+        ]
+    },
+    "Garchomp": {
+        "type": [
+            "Dragon",
+            "Ground"
+        ],
+        "hp": 108,
+        "attack": 130,
+        "defense": 95,
+        "sp_atk": 80,
+        "sp_def": 85,
+        "speed": 102,
+        "moves": [
+            "Dragon_Claw",
+            "Earthquake",
+            "Stone_Edge",
+            "Aqua_Tail"
+        ]
+    },
+    "Hydreigon": {
+        "type": [
+            "Dark",
+            "Dragon"
+        ],
+        "hp": 92,
+        "attack": 105,
+        "defense": 90,
+        "sp_atk": 125,
+        "sp_def": 90,
+        "speed": 98,
+        "moves": [
+            "Draco_Meteor",
+            "Dark_Pulse",
+            "Fire_Blast",
+            "Charge_Beam"
+        ]
+    },
+    "Metagross": {
+        "type": [
+            "Steel",
+            "Psychic"
+        ],
+        "hp": 80,
+        "attack": 135,
+        "defense": 130,
+        "sp_atk": 95,
+        "sp_def": 90,
+        "speed": 70,
+        "moves": [
+            "Meteor_Mash",
+            "Ice_Punch",
+            "Thunder_Punch",
+            "Bullet_Punch"
+        ]
+    },
+    "Sylveon": {
+        "type": [
+            "Fairy"
+        ],
+        "hp": 95,
+        "attack": 65,
+        "defense": 65,
+        "sp_atk": 110,
+        "sp_def": 130,
+        "speed": 60,
+        "moves": [
+            "Hyper_Voice",
+            "Mystical_Fire",
+            "Shadow_Ball",
+            "Moonblast"
+        ]
+    }
+}
