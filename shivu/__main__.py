@@ -17,7 +17,8 @@ from shivu.modules.lrank import periodic_rank_updates, initialize_rank_db  # Imp
 from shivu.modules.lloan import initialize_loan_db, periodic_loan_checks  # Import
 from flask import Flask, jsonify
 import threading
-import nest_asyncio
+import uvloop
+uvloop.install()
 
 app = Flask(__name__)
 
