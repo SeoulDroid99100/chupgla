@@ -45,10 +45,10 @@ def create_pokemon(pokemon_name, player_id):
     pokemon_module = importlib.import_module("shivu.modules.lpvp.pokemon")
     Pokemon = pokemon_module.Pokemon
     move_module = importlib.import_module("shivu.modules.lpvp.move")
-    Move = move_module.Move
+    Move = move_module.Move  # Corrected:  Import the Move class
 
     moves = []
-    loaded_moves = load_moves()  # Load moves 
+    loaded_moves = load_moves()  # Load moves
     for move_name in data['moves']:
         move_data_dict = loaded_moves.get(move_name)  # Use .get()
         if move_data_dict:
@@ -56,21 +56,23 @@ def create_pokemon(pokemon_name, player_id):
         else:
             print(f"ERROR: Could not find data for move: {move_name}")
             # Consider handling this more gracefully, e.g., skipping the move
-
+   
     # Create a dictionary for moves, with pp.
     modified_moves = []
-    for move_data_dict in moves:
-        modified_moves.append({
-            "name": move_data_dict['name'],
-            "power": move_data_dict['power'],
-            "type": move_data_dict['type'],
-            "category": move_data_dict['category'],
-            "accuracy": move_data_dict['accuracy'],
-            "priority": move_data_dict['priority'],
-            "pp": move_data_dict['pp'],
-            "max_pp": move_data_dict['pp'],  # Store max_pp
-            "description": move_data_dict['description']
-        })
+    for move_name in data['moves']:  # Iterate over the *names*
+        move_data_dict = loaded_moves.get(move_name)
+        if move_data_dict:  # Check if move data exists
+            modified_moves.append({
+                "name": move_name,  # Correctly use move_name (the key)
+                "power": move_data_dict['power'],
+                "type": move_data_dict['type'],
+                "category": move_data_dict['category'],
+                "accuracy": move_data_dict['accuracy'],
+                "priority": move_data_dict['priority'],
+                "pp": move_data_dict['pp'],
+                "max_pp": move_data_dict['pp'],
+                "description": move_data_dict['description']
+            })
    
     # Override pokemon moves
     data['moves'] = modified_moves
