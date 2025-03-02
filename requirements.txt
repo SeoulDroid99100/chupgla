@@ -10,5 +10,5 @@ tgcrypto
 python-dotenv
 cachetools 
 psutil
-uvloop
+nest_asyncio
 flask
