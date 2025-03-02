@@ -140,7 +140,7 @@ class Pokemon(Item):
         if stat_name == 'hp':
             return int((2 * val + 31 + (252 / 4)) + self.level + 10)
         else:
-            return int((2 * val + 31) + 5
+            return int((2 * val + 31) + 5)
 
     def move(self):
         if self.next_move:
