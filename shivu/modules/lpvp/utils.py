@@ -7,108 +7,82 @@ import importlib
 POKE_DB_PATH = 'shivu/modules/lpvp/pokemons.json'
 MOVE_DB_PATH = 'shivu/modules/lpvp/moves.json'
 
-# Load data on module import (avoids repeated file reads)
+# Load data on module import
 try:
     with open(POKE_DB_PATH, 'r') as f:
         pokemon_data = json.load(f)
     with open(MOVE_DB_PATH, 'r') as f:
         move_data = json.load(f)
 except FileNotFoundError:
-    print("ERROR: pokemons.json or moves.json not found in shivu/modules/lpvp/")
-    exit()  # Exit if data files are missing.  CRITICAL error.
+    print("ERROR: pokemons.json or moves.json not found.")
+    exit()
 except json.JSONDecodeError:
-    print("ERROR: pokemons.json or moves.json contains invalid JSON.")
+    print("ERROR: Invalid JSON in data files.")
     exit()
 
-def load_moves():
-    """Loads move data from moves.json."""
-    try:
-        with open(MOVE_DB_PATH, 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        print(f"ERROR: Could not find moves file at {MOVE_DB_PATH}")
-        return {}  # Return empty dict on failure
-    except json.JSONDecodeError:
-        print(f"ERROR: Invalid JSON in {MOVE_DB_PATH}")
-        return {}
-
-
-
 def create_pokemon(pokemon_name, player_id):
-    """Creates a Pokemon object from the loaded data."""
+    """Creates a Pokemon object with Move instances."""
     data = pokemon_data.get(pokemon_name)
     if not data:
-        print(f"ERROR: Could not find data for Pokemon: {pokemon_name}")
-        return None  # Return None if pokemon not found
+        print(f"ERROR: Pokemon not found: {pokemon_name}")
+        return None
 
-    # Dynamically import Pokemon and Move classes
+    # Dynamically import classes
     pokemon_module = importlib.import_module("shivu.modules.lpvp.pokemon")
     Pokemon = pokemon_module.Pokemon
     move_module = importlib.import_module("shivu.modules.lpvp.move")
-    Move = move_module.Move  # Corrected:  Import the Move class
+    Move = move_module.Move
 
     moves = []
-    loaded_moves = load_moves()  # Load moves
     for move_name in data['moves']:
-        move_data_dict = loaded_moves.get(move_name)  # Use .get()
-        if move_data_dict:
-            moves.append(move_data_dict)
-        else:
-            print(f"ERROR: Could not find data for move: {move_name}")
-            # Consider handling this more gracefully, e.g., skipping the move
-
-    # Create a dictionary for moves, with pp.
-    modified_moves = []
-    for move_name in data['moves']:  # Iterate over the *names*
-        move_data_dict = loaded_moves.get(move_name)
-        if not move_data_dict:
-           print(f"ERROR: Move data for {move_name} not found in moves.json. Skipping.")
-           continue  # Skip this move entirely
+        move_info = move_data.get(move_name)
+        if not move_info:
+            print(f"ERROR: Move '{move_name}' not found for {pokemon_name}.")
+            continue  # Skip invalid moves
 
         try:
-            modified_moves.append({
-                "name": move_name,  # Correctly use move_name (the key)
-                "power": move_data_dict.get('power', 0),  # Use .get() with defaults
-                "type": move_data_dict.get('type', 'Normal'), # Default type
-                "category": move_data_dict.get('category', 'Status'), # Default Category
-                "accuracy": move_data_dict.get('accuracy', 1.0), # Default accuracy
-                "priority": move_data_dict.get('priority', 0),
-                "pp": move_data_dict.get('pp', 5),  # Default PP
-                "max_pp": move_data_dict.get('pp', 5),
-                "description": move_data_dict.get('description', '')
-            })
+            # Create Move instance using pre-loaded data
+            move = Move(user=None, name=move_info['name'], **move_info)  # Pass user=None for now
+            moves.append(move)
         except KeyError as e:
-            print(f"ERROR: Move {move_name} missing key {e}. Skipping.")
-            continue  # Skip to the next move
+            print(f"ERROR: Missing key in move '{move_name}': {e}")
+            continue
+        except TypeError as e:
+            print(f"ERROR: TypeError creating move '{move_name}': {e}")
+            continue
 
+    # The 'moves' key in 'data' now holds a list of Move *instances*
+    data['moves'] = moves
+    return Pokemon(player=(player_id, "Player"), **data)  # 'Player' hardcoded for now
 
-    # Override pokemon moves
-    data['moves'] = modified_moves
-
-    return Pokemon(player=(player_id, "Player"), **data)  # Pass necessary data
 
 
 async def assign_pokemon(user_id: int):
     """Assigns 6 random Pokémon to a user."""
     available_pokemon = list(pokemon_data.keys())
-    random.shuffle(available_pokemon)
-    selected_pokemon_names = available_pokemon[:6]
-    pokemon_list = []
-    for name in selected_pokemon_names:
-        poke = create_pokemon(name, user_id)
-        if poke:  # Ensure Pokemon creation was successful
-            pokemon_list.append(poke)
+    if len(available_pokemon) < 6:
+        raise ValueError("Not enough Pokémon in the database.")
 
-    # Store only the *names* of the Pokemon in the database.  We'll recreate
-    # the Pokemon objects when we need them.  This is MUCH better for
-    # in-memory battles.
+    selected = random.sample(available_pokemon, 6)
+    pokemon_list = []
+    for name in selected:
+        poke = create_pokemon(name, user_id)
+        if poke:
+            pokemon_list.append(poke)
+        # else:  No need to print, create_pokemon will log errors.
+
+    # Ensure exactly 6 Pokémon are assigned
+    if len(pokemon_list) != 6:
+         # Instead of raising, try again.  This is more robust.
+         print("WARNING: Failed to create 6 valid pokemon.  Trying again.")
+         return await assign_pokemon(user_id) # Recursive call
+
     await xy.update_one(
         {"user_id": user_id},
-        {"$set": {"pokemon.team": [p.name for p in pokemon_list],
-                  "pokemon.active": 0}},  # Index of active pokemon
+        {"$set": {"pokemon.team": [p.name for p in pokemon_list], "pokemon.active": 0}},
         upsert=True
     )
-    return pokemon_list  # Return the list of Pokemon objects (important!)
+    return pokemon_list
 
 
 async def get_user_pokemon(user_id: int):
