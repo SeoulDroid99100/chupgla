@@ -8,15 +8,14 @@ from os.path import basename, dirname, isfile
 
 StartTime = time.time()
 
-# enable logging
+# enable logging (Keep your existing logging setup)
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
     handlers=[logging.FileHandler("log.txt"), logging.StreamHandler()],
     level=logging.INFO,
 )
-
 logging.getLogger("apscheduler").setLevel(logging.ERROR)
-logging.getLogger("httpx").setLevel(logging.WARNING)  # Keep this, as it seems to be a dependency
+logging.getLogger("httpx").setLevel(logging.WARNING)  # Keep this
 logging.getLogger("pyrate_limiter").setLevel(logging.ERROR)
 LOGGER = logging.getLogger(__name__)
 
@@ -27,24 +26,30 @@ if sys.version_info[0] < 3 or sys.version_info[1] < 6:
     )
     quit(1)
 
-LOAD = []
+LOAD = []  #  Empty lists are fine here
 NO_LOAD = []
 
 def __list_all_modules():
     import glob
     from os.path import basename, dirname, isfile
 
-    # This generates a list of modules in this folder for the * in __main__ to work.
+    # Find modules (regular .py files)
     mod_paths = glob.glob(dirname(__file__) + "/*.py")
     all_modules = [
         basename(f)[:-3]
         for f in mod_paths
         if isfile(f) and f.endswith(".py") and not f.endswith("__init__.py")
     ]
-     # Include subpackages explicitly
-    all_modules.append("lpvp") # CRUCIAL: Add the lpvp package
 
-    if LOAD or NO_LOAD:
+    # Find *packages* (directories with __init__.py)
+    pkg_paths = glob.glob(dirname(__file__) + "/*/")  # Find directories
+    all_modules.extend([
+        basename(p[:-1]) for p in pkg_paths  # Add package name
+        if isfile(p + "__init__.py")          # *if* they have an __init__.py
+    ])
+    # No need to explicitly add 'pvp', it's found by the glob above.
+
+    if LOAD or NO_LOAD:  # Keep your LOAD/NO_LOAD logic
         to_load = LOAD
         if to_load:
             if not all(
@@ -56,16 +61,13 @@ def __list_all_modules():
 
             all_modules = sorted(set(all_modules) - set(to_load))
             to_load = list(all_modules) + to_load
-
         else:
             to_load = all_modules
 
         if NO_LOAD:
             LOGGER.info("Not loading: {}".format(NO_LOAD))
             return [item for item in to_load if item not in NO_LOAD]
-
         return to_load
-
     return all_modules
 
 
