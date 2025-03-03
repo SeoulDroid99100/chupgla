@@ -29,7 +29,7 @@ class BattlePokemon:
     def _compute_stat(self, stat_name, base_value):
         if stat_name == "hp":
             return int((2 * base_value + 31 + 63) + 100 + 10)
-        return int(((2 * base_value + 31) * 100 / 100) + 5
+        return int(((2 * base_value + 31) * 100 / 100)) + 5
 
     @property
     def attack(self):
