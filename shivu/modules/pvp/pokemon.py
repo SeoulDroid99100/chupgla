@@ -3,7 +3,7 @@ from .base import Item, STAT_NAMES, Factory, coef_stage
 from .move import Move
 from .status import *
 
-MOVE_DB_PATH = 'shivu.modules.pvp.moves.json'
+MOVE_DB_PATH = '.moves.json'
 
 def stat(stat_name):
     stat_name = stat_name.lower()
