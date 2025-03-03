@@ -4,10 +4,11 @@ from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
 import json
 from typing import Dict, List
+import os
 
 # Load Pokémon data
 ka = os.path.join(os.path.dirname(__file__), 'pokemons.json')
-with open("ka") as f:
+with open(ka, "r") as f:
     POKEMONS: Dict[str, dict] = json.load(f)
     
 POKE_NAMES = list(POKEMONS.keys())
