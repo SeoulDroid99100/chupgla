@@ -1,185 +1,197 @@
 # shivu/modules/pvp/status.py
 import random
-from .base import Item  # Relative import
+from pyrogram.types import InlineKeyboardMarkup
+from .base import Item
 
+class Status(Item):
+    def __init__(self, name):
+        super().__init__()
+        self.name = name
+        self.turns_remaining = 0
+        self.messages = []
 
-class Status(Item):  # Inherit from Item
-    def __eq__(self, rhs):
-        try:
-            eq = self.name == rhs.name
-        except AttributeError:
-            eq = self.name == rhs
-        return eq
+    async def apply(self, pokemon):
+        pass
 
-    def __repr__(self):
-        return self.name  # For cleaner display in status lists
+    async def end_turn(self, pokemon):
+        pass
 
-    def bind(self, user):
-        self.user = user
+    async def remove(self, pokemon):
+        pass
 
-    def start(self):
-        """Called when the status is first applied."""
-        pass  # Default: no action
-
-    def end_turn(self):
-        """Called at the end of each turn the status is active."""
-        pass  # Default: no action
-
-    def remove(self):
-        """Called when the status is removed."""
-        pass # Default no action
-
-
-class flinch(Status):
-    name = 'flinch'
-
-    def start(self):
-        self.user.active = False  # Prevent action on the turn flinch is applied
-
-    def end_turn(self):
-        # Flinch only lasts for one turn, so we remove it
-        self.user.active = True
-        self.user.remove_status(self)
-        print(f"{self.user.player[1]}'s {self.user.name} can't move as it flinched!")
-        print()
-
-class poison(Status):
-    name = 'poison'
-
-    def start(self):
-        print(f"{self.user.player[1]}'s {self.user.name} is poisoned!")
-        print()
-
-    def end_turn(self):
-        hp_loss = int(self.user.max_hp / 8)
-        self.user.hp -= hp_loss
-        print(f"{self.user.player[1]}'s {self.user.name} lost {hp_loss} HP due to the poison!")
-        print()
-
-
-class bad_poison(Status):
-    name = 'bad_poison'
-
-    def start(self):
-        self.poison_level = 1  # Increasing damage each turn
-        print(f"{self.user.player[1]}'s {self.user.name} is badly poisoned!")
-        print()
-
-    def end_turn(self):
-        hp_loss = int(self.user.max_hp * self.poison_level * (1 / 16))
-        self.user.hp -= hp_loss
-        print(f"{self.user.player[1]}'s {self.user.name} lost {hp_loss} HP due to the bad poison!")
-        print()
-        self.poison_level += 1
-
-
-class sleep(Status):
-    name = 'sleep'
-
-    def __init__(self, t_sleep=None):
-        # Number of turns for normal sleep,
-        self.t_sleep = t_sleep if t_sleep else random.randint(1, 3)  # 1-3 turns of sleep
-
-    def start(self):
-        self.user.active = False # Pokemon cannot do actions while sleep
-        print(f"{self.user.player[1]}'s {self.user.name} fell asleep!")
-        print()
-
-    def end_turn(self):
-        self.t_sleep -= 1
-        if self.t_sleep > 0:
-             print(f"{self.user.player[1]}'s {self.user.name} is fast asleep!")
-             print()
-        if self.t_sleep == 0:
-            self.user.remove_status('sleep')
-            print(f"{self.user.player[1]}'s {self.user.name} woke up! But it can't move just yet!")
-            print()
-
-
-    def remove(self):
-        self.user.active = True
-
-
-class burn(Status):
-    name = 'burn'
-
-    def start(self):
-        print(f"{self.user.player[1]}'s {self.user.name} was burned!")
-        print()
-
-    def end_turn(self):
-        hp_loss = int(self.user.max_hp / 16)
-        self.user.hp -= hp_loss
-        print(f"{self.user.player[1]}'s {self.user.name} lost {hp_loss} HP due to the burn!")
-        print()
-
-
-class leech_seed(Status):
-    name = 'leech_seed'
-
-    def start(self):
-        print(f"{self.user.player[1]}'s {self.user.name} was seeded!")
-        print()
-
-    def end_turn(self):
-        user = self.user
-        opp = user.opp
-        hp_change = int(user.max_hp / 8)
-        user.hp -= hp_change
-        opp.hp += hp_change
-
-        # Make sure not overpass the max_hp
-        if opp.hp > opp.max_hp:
-            opp.hp = opp.max_hp
-
-        print(f"{user.player[1]}'s {user.name} lost {hp_change} HP due to Leech Seed!")
-        print()
-        print(f"{opp.player[1]}'s {opp.name} has gained {hp_change} HP from {user.player[1]}'s {user.name} due to Leech Seed!")
-        print()
+class Burn(Status):
+    def __init__(self):
+        super().__init__("burn")
         
+    async def apply(self, pokemon):
+        if 'Fire' in pokemon.type:
+            self.messages.append(f"{pokemon.name} is immune to burn!")
+            return False
+            
+        original_attack = pokemon.attack
+        pokemon.attack = int(pokemon.attack * 0.5)
+        self.messages.extend([
+            f"{pokemon.name} was burned!",
+            f"{pokemon.name}'s Attack fell to {pokemon.attack} (from {original_attack})"
+        ])
+        return True
 
-class paralyse(Status):
-    name = 'paralyse'
+    async def end_turn(self, pokemon):
+        damage = pokemon.max_hp // 16
+        pokemon.hp = max(0, pokemon.hp - damage)
+        self.messages.append(f"{pokemon.name} took {damage} burn damage!")
+        return True
 
-    def start(self):
-        user = self.user
-        user.speed /= 2  #Paralysis cuts speed in half.
-        print(f"{user.player[1]}'s {user.name} is paralysed! It may be unable to move!")
-        print()
+class Poison(Status):
+    def __init__(self):
+        super().__init__("poison")
+        
+    async def apply(self, pokemon):
+        if 'Poison' in pokemon.type or 'Steel' in pokemon.type:
+            self.messages.append(f"{pokemon.name} is immune to poison!")
+            return False
+        self.messages.append(f"{pokemon.name} was poisoned!")
+        return True
 
-    def end_turn(self):
-        user = self.user
-        if random.random() < 0.25:
-            user.active = False #  25% chance of being fully paralyzed
-            print(f"{user.player[1]}'s {user.name} is fully paralysed!")
-            print()
+    async def end_turn(self, pokemon):
+        damage = pokemon.max_hp // 8
+        pokemon.hp = max(0, pokemon.hp - damage)
+        self.messages.append(f"{pokemon.name} took {damage} poison damage!")
+        return True
 
-        else:
-            user.active = True
+class BadPoison(Status):
+    def __init__(self):
+        super().__init__("bad_poison")
+        self.counter = 1
+        
+    async def apply(self, pokemon):
+        if 'Poison' in pokemon.type or 'Steel' in pokemon.type:
+            self.messages.append(f"{pokemon.name} is immune to poison!")
+            return False
+        self.messages.append(f"{pokemon.name} was badly poisoned!")
+        return True
 
-    def remove(self):
-        user = self.user
-        user.speed *= 2 # Restore speed
-        user.active = True # Restore flag
+    async def end_turn(self, pokemon):
+        damage = (pokemon.max_hp * self.counter) // 16
+        self.counter += 1
+        pokemon.hp = max(0, pokemon.hp - damage)
+        self.messages.append(f"{pokemon.name} took {damage} toxic damage!")
+        return True
 
+class Sleep(Status):
+    def __init__(self):
+        super().__init__("sleep")
+        self.turns_remaining = random.randint(1, 3)
+        
+    async def apply(self, pokemon):
+        if 'freeze' in pokemon.status:
+            self.messages.append(f"{pokemon.name} can't sleep while frozen!")
+            return False
+            
+        pokemon.active = False
+        self.messages.append(f"{pokemon.name} fell asleep!")
+        return True
 
-class freeze(Status):
-    name = 'freeze'
-    def start(self):
-        user = self.user
-        user.active = False
-        print(f"{user.player[1]}'s {user.name} is frozen!")
-        print()  
- 
-    def end_turn(self):
-        user = self.user
+    async def end_turn(self, pokemon):
+        self.turns_remaining -= 1
+        if self.turns_remaining <= 0:
+            pokemon.active = True
+            self.messages.append(f"{pokemon.name} woke up!")
+            return False
+        self.messages.append(f"{pokemon.name} is sleeping ({self.turns_remaining} turns left)")
+        return True
 
+class Freeze(Status):
+    def __init__(self):
+        super().__init__("freeze")
+        
+    async def apply(self, pokemon):
+        if 'Ice' in pokemon.type:
+            self.messages.append(f"{pokemon.name} is immune to freezing!")
+            return False
+            
+        pokemon.active = False
+        self.messages.append(f"{pokemon.name} was frozen solid!")
+        return True
+
+    async def end_turn(self, pokemon):
         if random.random() < 0.2:
-            user.remove_status(self)
-            user.active = True
-            print(f"{user.player[1]}'s {user.name} has thawed out and can now move in the next turn!")
-            print()
+            pokemon.active = True
+            self.messages.append(f"{pokemon.name} thawed out!")
+            return False
+        self.messages.append(f"{pokemon.name} is frozen!")
+        return True
 
-        else:
-            print(f"{user.player[1]}'s {user.name} can't move as it is currently frozen!")
-            print()
+class Paralyze(Status):
+    def __init__(self):
+        super().__init__("paralyze")
+        
+    async def apply(self, pokemon):
+        if 'Electric' in pokemon.type:
+            self.messages.append(f"{pokemon.name} is immune to paralysis!")
+            return False
+            
+        original_speed = pokemon.speed
+        pokemon.speed = int(pokemon.speed * 0.5)
+        self.messages.extend([
+            f"{pokemon.name} was paralyzed!",
+            f"{pokemon.name}'s Speed fell to {pokemon.speed} (from {original_speed})"
+        ])
+        return True
+
+    async def end_turn(self, pokemon):
+        if random.random() < 0.25:
+            pokemon.active = False
+            self.messages.append(f"{pokemon.name} is fully paralyzed!")
+            return True
+        return False
+
+class Flinch(Status):
+    def __init__(self):
+        super().__init__("flinch")
+        
+    async def apply(self, pokemon):
+        pokemon.active = False
+        self.messages.append(f"{pokemon.name} flinched!")
+        return True
+
+    async def end_turn(self, pokemon):
+        pokemon.active = True
+        return False
+
+class LeechSeed(Status):
+    def __init__(self):
+        super().__init__("leech_seed")
+        
+    async def apply(self, pokemon):
+        if 'Grass' in pokemon.type:
+            self.messages.append(f"{pokemon.name} is immune to Leech Seed!")
+            return False
+        self.messages.append(f"{pokemon.name} was seeded!")
+        return True
+
+    async def end_turn(self, pokemon):
+        damage = pokemon.max_hp // 8
+        pokemon.hp = max(0, pokemon.hp - damage)
+        opponent = pokemon.opp
+        opponent.hp = min(opponent.max_hp, opponent.hp + damage)
+        self.messages.extend([
+            f"{pokemon.name} lost {damage} HP from Leech Seed!",
+            f"{opponent.name} gained {damage} HP!"
+        ])
+        return True
+
+# Status effect registry
+STATUS_MAP = {
+    "burn": Burn,
+    "poison": Poison,
+    "bad_poison": BadPoison,
+    "sleep": Sleep,
+    "freeze": Freeze,
+    "paralyze": Paralyze,
+    "flinch": Flinch,
+    "leech_seed": LeechSeed
+}
+
+async def create_status(status_name):
+    return STATUS_MAP.get(status_name.lower())()
