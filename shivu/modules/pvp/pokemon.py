@@ -1,7 +1,8 @@
 import json
 from math import ceil
-
-with open("coef_type.json") as f:
+import os
+JP = os.path.join(os.path.dirname(__file__), 'coef_type.json')
+with open("JP") as f:
     TYPE_EFFECTIVENESS = json.load(f)
 
 STAT_STAGES = [2/8, 2/7, 2/6, 2/5, 2/4, 2/3, 2/2, 
