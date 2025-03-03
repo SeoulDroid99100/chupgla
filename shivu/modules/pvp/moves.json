@@ -1,0 +1,461 @@
+{
+	"Curse": {
+		"power": 0,
+		"type": "Ghost",
+		"category": "Status",
+		"accuracy": 0,
+		"priority": 0,
+		"pp": 10,
+		"description": "Raises Attack and Defense stats by 1 stage each, reduces Speed stat by 1 stage."
+	},
+	"Body_Slam": {
+		"power": 85,
+		"type": "Normal",
+		"category": "Physical",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 15,
+		"description": "Deals damage and 30% chance of paralysis."
+	},
+	"Rest": {
+		"power": 0,
+		"type": "Psychic",
+		"category": "Status",
+		"accuracy": 0,
+		"priority": 0,
+		"pp": 10,
+		"description": "Sleeps for 2 turns, but fully restores HP and clears status effects."
+	},
+	"Earthquake": {
+		"power": 100,
+		"type": "Ground",
+		"category": "Physical",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 10,
+		"description": "Deals damage."
+	},
+	"Swords_Dance": {
+		"power": 0,
+		"type": "Normal",
+		"category": "Status",
+		"accuracy": 0,
+		"priority": 0,
+		"pp": 20,
+		"description": "Raises Attack stat by 2 stages."
+	},
+	"Meteor_Mash": {
+		"power": 90,
+		"type": "Steel",
+		"category": "Physical",
+		"accuracy": 0.9,
+		"priority": 0,
+		"pp": 10,
+		"description": "Deals damage and 20% chance to raise Attack stat by 1 stage."
+	},
+	"Close_Combat": {
+		"power": 120,
+		"type": "Fighting",
+		"category": "Physical",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 5,
+		"description": "Lowers Defense and Sp_Def stats by 1 stage each."
+	},
+	"Bullet_Punch": {
+		"power": 40,
+		"type": "Steel",
+		"category": "Physical",
+		"accuracy": 1,
+		"priority": 1,
+		"pp": 30,
+		"description": "Deals damage, usually moves before most other moves."
+	},
+	"Dragon_Dance": {
+		"power": 0,
+		"type": "Dragon",
+		"category": "Status",
+		"accuracy": 0,
+		"priority": 0,
+		"pp": 20,
+		"description": "Raises Attack and Speed stats by 1 stage each."
+	},
+	"Double_Edge": {
+		"power": 120,
+		"type": "Normal",
+		"category": "Physical",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 15,
+		"description": "Deals damage and receives recoil damage of 1/3 of target's lost HP from damage."
+	},
+	"Dragon_Claw": {
+		"power": 80,
+		"type": "Dragon",
+		"category": "Physical",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 15,
+		"description": "Deals damage."
+	},
+	"Aerial_Ace": {
+		"power": 60,
+		"type": "Flying",
+		"category": "Physical",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 20,
+		"description": "Deals damage, never misses."
+	},
+	"Scald": {
+		"power": 80,
+		"type": "Water",
+		"category": "Special",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 15,
+		"description": "Deals damage and 30% chance to burn the target."
+	},
+	"Toxic": {
+		"power": 0,
+		"type": "Poison",
+		"category": "Status",
+		"accuracy": 0.9,
+		"priority": 0,
+		"pp": 10,
+		"description": "Badly poisons the target, and if the user is a Poison type Pokemon, this move will always hit the target."
+	},
+	"Sludge_Bomb": {
+		"power": 90,
+		"type": "Poison",
+		"category": "Special",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 10,
+		"description": "Deals damage and 30% chance to poison the target."
+	},
+	"Dazzling_Gleam": {
+		"power": 80,
+		"type": "Fairy",
+		"category": "Special",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 10,
+		"description": "Deals damage."
+	},
+	"Stone_Edge": {
+		"power": 100,
+		"type": "Rock",
+		"category": "Physical",
+		"accuracy": 0.8,
+		"priority": 0,
+		"pp": 5,
+		"description": "Deals damage, has a high critical hit ratio."
+	},
+	"Megahorn": {
+		"power": 120,
+		"type": "Bug",
+		"category": "Physical",
+		"accuracy": 0.85,
+		"priority": 0,
+		"pp": 10,
+		"description": "Deals damage."
+	},
+	"Ice_Punch": {
+		"power": 75,
+		"type": "Ice",
+		"category": "Physical",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 15,
+		"description": "Deals damage and 10% chance to Freeze the target."
+	},
+	"Rock_Slide": {
+		"power": 75,
+		"type": "Rock",
+		"category": "Physical",
+		"accuracy": 0.9,
+		"priority": 0,
+		"pp": 10,
+		"description": "Deals damage and 30% chance to flinch the target."
+	},
+	"Crunch": {
+		"power": 80,
+		"type": "Dark",
+		"category": "Physical",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 15,
+		"description": "Deals damage and 20% chance to lower target's Defense stat by 1 stage."
+	},
+	"Fire_Punch": {
+		"power": 75,
+		"type": "Fire",
+		"category": "Physical",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 15,
+		"description": "Deals damage and 10% chance to Burn the target."
+	},
+	"Quiver_Dance": {
+		"power": 0,
+		"type": "Bug",
+		"category": "Status",
+		"accuracy": 0,
+		"priority": 0,
+		"pp": 20,
+		"description": "Raises the user's Sp_Atk, Sp_Def and Speed stats by 1 stage each."
+	},
+	"Flamethrower": {
+		"power": 90,
+		"type": "Fire",
+		"category": "Special",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 15,
+		"description": "Deals damage and 10% chance to Burn the target."
+	},
+	"Bug_Buzz": {
+		"power": 90,
+		"type": "Bug",
+		"category": "Special",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 10,
+		"description": "Deals damage and 10% chance to lower the target's Sp_Def stat by 1 stage."
+	},
+	"Roost": {
+		"power": 0,
+		"type": "Flying",
+		"category": "Status",
+		"accuracy": 0,
+		"priority": 0,
+		"pp": 10,
+		"description": "User restores 50% of their max HP, rounded half up."
+	},
+	"Shadow_Ball": {
+		"power": 80,
+		"type": "Ghost",
+		"category": "Special",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 15,
+		"description": "Deals damage and 20% chance of lowering target's Sp. Def stat by 1 stage."
+	},
+	"Sludge_Wave": {
+		"power": 95,
+		"type": "Poison",
+		"category": "Special",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 10,
+		"description": "Deals damage and 10% chance of Poisoning the target."
+	},
+	"Focus_Blast": {
+		"power": 120,
+		"type": "Fighting",
+		"category": "Special",
+		"accuracy": 0.7,
+		"priority": 0,
+		"pp": 5,
+		"description": "Deals damage and 10% chance of lowering target's Sp. Def stat by 1 stage."
+	},
+	"Thunderbolt": {
+		"power": 90,
+		"type": "Electric",
+		"category": "Special",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 15,
+		"description": "Deals damage and 10% chance to Paralyse the target."
+	},
+	"Fire_Blast": {
+		"power": 110,
+		"type": "Fire",
+		"category": "Special",
+		"accuracy": 0.85,
+		"priority": 0,
+		"pp": 5,
+		"description": "Deals damage and 10% chance to Burn the target."
+	},
+	"Air_Slash": {
+		"power": 75,
+		"type": "Flying",
+		"category": "Special",
+		"accuracy": 0.9,
+		"priority": 0,
+		"pp": 15,
+		"description": "Deals damage and 30% chance to Flinch the target."
+	},
+	"Dragon_Pulse": {
+		"power": 85,
+		"type": "Dragon",
+		"category": "Special",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 10,
+		"description": "Deals damage."
+	},
+	"Hydro_Pump": {
+		"power": 110,
+		"type": "Water",
+		"category": "Special",
+		"accuracy": 0.8,
+		"priority": 0,
+		"pp": 5,
+		"description": "Deals damage."
+	},
+	"Ice_Beam": {
+		"power": 90,
+		"type": "Ice",
+		"category": "Special",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 10,
+		"description": "Deals damage and 10% chance to Freeze the target."
+	},
+	"Aura_Sphere": {
+		"power": 80,
+		"type": "Fighting",
+		"category": "Special",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 20,
+		"description": "Deals damage and this move will always hit."
+	},
+	"Leech_Seed": {
+		"power": 0,
+		"type": "Grass",
+		"category": "Status",
+		"accuracy": 0.9,
+		"priority": 0,
+		"pp": 10,
+		"description": "Target loses 1/8 of its maximum HP, and user gains that same amount of HP at the end of every turn."
+	},
+	"Leaf_Storm": {
+		"power": 130,
+		"type": "Grass",
+		"category": "Special",
+		"accuracy": 0.9,
+		"priority": 0,
+		"pp": 5,
+		"description": "Deals damage and lowers the user's Sp_Atk stat by 2 stages."
+	},
+	"Psychic": {
+		"power": 90,
+		"type": "Psychic",
+		"category": "Special",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 10,
+		"description": "Deals damage and 10% chance to lower target's Sp_Def stat 1 stage."
+	},
+	"Moonblast": {
+		"power": 95,
+		"type": "Fairy",
+		"category": "Special",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 15,
+		"description": "Deals damage and 30% chance to lower target's Sp_Atk stat by 1 stage."
+	},
+	"Will_O_Wisp": {
+		"power": 0,
+		"type": "Fire",
+		"category": "Status",
+		"accuracy": 0.85,
+		"priority": 0,
+		"pp": 15,
+		"description": "Burns the target."
+	},
+	"Ice_Shard": {
+		"power": 40,
+		"type": "Ice",
+		"category": "Physical",
+		"accuracy": 1,
+		"priority": 1,
+		"pp": 30,
+		"description": "Deals damage, usually moves before most other moves."
+	},
+	"Icicle_Crash": {
+		"power": 85,
+		"type": "Ice",
+		"category": "Physical",
+		"accuracy": 0.9,
+		"priority": 0,
+		"pp": 10,
+		"description": "Deals damage and 30% chance to flinch the target."
+	},
+	"Knock_Off": {
+		"power": 65,
+		"type": "Dark",
+		"category": "Physical",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 20,
+		"description": "Deals damage."
+	},
+	"Aqua_Tail": {
+		"power": 90,
+		"type": "Water",
+		"category": "Physical",
+		"accuracy": 0.9,
+		"priority": 0,
+		"pp": 10,
+		"description": "Deals damage."
+	},
+	"Draco_Meteor": {
+		"power": 130,
+		"type": "Dragon",
+		"category": "Special",
+		"accuracy": 0.9,
+		"priority": 0,
+		"pp": 5,
+		"description": "Deals damage and then lowers the user's Sp_Atk stat by 2 stages."
+	},
+	"Dark_Pulse": {
+		"power": 80,
+		"type": "Dark",
+		"category": "Special",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 15,
+		"description": "Deals damage and 20% chance to flinch the target."
+	},
+	"Charge_Beam": {
+		"power": 50,
+		"type": "Electric",
+		"category": "Special",
+		"accuracy": 0.9,
+		"priority": 0,
+		"pp": 10,
+		"description": "Deals damage and 70% chance to raise user's Sp_Atk stat by 1 stage."
+	},
+	"Thunder_Punch": {
+		"power": 75,
+		"type": "Electric",
+		"category": "Physical",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 15,
+		"description": "Deals damage and 10% chance to Paralyse the target."
+	},
+	"Hyper_Voice": {
+		"power": 90,
+		"type": "Normal",
+		"category": "Special",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 10,
+		"description": "Deals damage."
+	},
+	"Mystical_Fire": {
+		"power": 75,
+		"type": "Psychic",
+		"category": "Special",
+		"accuracy": 1,
+		"priority": 0,
+		"pp": 10,
+		"description": "Deals damage and lowers target's Sp_Atk stat by 1 stage."
+	}
+}
