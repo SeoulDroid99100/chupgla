@@ -2,8 +2,9 @@ import json
 from .base import Item, STAT_NAMES, Factory, coef_stage
 from .move import Move
 from .status import *
+import os
 
-MOVE_DB_PATH = '.moves.json'
+os.path.join(os.path.dirname(__file__), 'pvp', 'moves.json')
 
 def stat(stat_name):
     stat_name = stat_name.lower()
