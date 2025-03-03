@@ -1,128 +1,110 @@
-# shivu/modules/pvp/pokemon.py
-
 import json
-from .base import Item, STAT_NAMES, Factory, coef_stage  # Correct relative import
-from .move import Move, NORMAL_CRITICAL # Relative Import
-import os
-# The rest of the file is the same as the corrected version you provided,
-# EXCEPT for using the Factory class and using a dictionary for stats:
+from math import ceil
 
-def stat(stat_name):
-    """A property factory for Pokemon stats."""
-    stat_name = stat_name.lower()
+with open("coef_type.json") as f:
+    TYPE_EFFECTIVENESS = json.load(f)
 
-    def setter(instance, val):
-        if stat_name == 'hp':
-            max_hp = instance.max_hp
-            if val > max_hp:
-                val = max_hp
-            elif val <= 0:
-                val = 0
-        instance.__dict__[stat_name] = val
+STAT_STAGES = [2/8, 2/7, 2/6, 2/5, 2/4, 2/3, 2/2, 
+               3/2, 4/2, 5/2, 6/2, 7/2, 8/2]
 
-    def getter(instance):
-        val = instance.__dict__[stat_name]
-        if stat_name != 'hp':
-            val *= coef_stage[getattr(instance.stages, stat_name) + 6]
-        return int(val)
-
-    return property(getter, setter)
-
-class Stages(Item):
-    seperator = ' | '
-
-    def __setattr__(self, name, val):
-        if name in STAT_NAMES:
-            val = max(-6, min(6, val))
-        super().__setattr__(name, val)
-
-class Pokemon(Item):
-    move_fac = Factory(Move, os.path.join(os.path.dirname(__file__), "moves.json"))  # Use Factory
-    stats = {} # Using dictionary
-    for stat_name in STAT_NAMES:
-        stats[stat_name] = stat(stat_name)
-
-    def __init__(self, player, **kwargs):
-        super().__init__(**kwargs)
-        self.player = player
-        self.level = 100
-        self.active = True
+class BattlePokemon:
+    def __init__(self, data):
+        self.base_data = data
+        self.name = data["name"]
+        self.types = data["type"]
+        self.moves = data["moves"][:4]  # Only first 4 moves
         self.status = []
-        self.next_move = None
-        self.stages = Stages(**{stat_name: 0 for stat_name in STAT_NAMES})
-        self.critical = NORMAL_CRITICAL # Keep Normal critical.
-        for stat_name in STAT_NAMES:
-            basic_stat = getattr(self, stat_name)
-            setattr(self, 'basic_' + stat_name, basic_stat)
-            self.__dict__[stat_name] = self.compute_stat(stat_name, basic_stat)
-        self.max_hp = self.hp
+        self.stages = {stat: 0 for stat in ["attack", "defense", "sp_atk", "sp_def", "speed"]}
+        
+        # Calculate base stats
+        self.max_hp = self._compute_stat("hp", data["hp"])
+        self.hp = self.max_hp
+        self._attack = self._compute_stat("attack", data["attack"])
+        self._defense = self._compute_stat("defense", data["defense"])
+        self._sp_atk = self._compute_stat("sp_atk", data["sp_atk"])
+        self._sp_def = self._compute_stat("sp_def", data["sp_def"])
+        self._speed = self._compute_stat("speed", data["speed"])
 
-        if 'moves' in self.__dict__:
-            self._moves = [self.move_fac.make(name, user=self) for name in self.moves]
+    def _compute_stat(self, stat_name, base_value):
+        if stat_name == "hp":
+            return int((2 * base_value + 31 + 63) + 100 + 10)
+        return int(((2 * base_value + 31) * 100 / 100) + 5
 
-    def bind_opp(self, opp):
-        self.opp = opp
-        for move in self._moves:
-            move.opp = opp
+    @property
+    def attack(self):
+        return self._apply_stage_modifier("attack", self._attack)
 
-    def add_status(self, status_name, *arg, **kwargs):
-        status = globals()[status_name](*arg, **kwargs)
-        status.bind(self)
-        status.start()
-        self.status.append(status)
-            
+    @property
+    def defense(self):
+        return self._apply_stage_modifier("defense", self._defense)
+
+    @property
+    def sp_atk(self):
+        return self._apply_stage_modifier("sp_atk", self._sp_atk)
+
+    @property
+    def sp_def(self):
+        return self._apply_stage_modifier("sp_def", self._sp_def)
+
+    @property
+    def speed(self):
+        return self._apply_stage_modifier("speed", self._speed)
+
+    def _apply_stage_modifier(self, stat, base_value):
+        stage = self.stages[stat] + 6
+        return int(base_value * STAT_STAGES[stage])
+
+    def apply_damage(self, damage):
+        self.hp = max(0, self.hp - damage)
+
+    def add_status(self, status):
+        if status not in self.status and status in ["burn", "paralyze", "sleep", "freeze", "poison", "bad_poison"]:
+            self.status.append(status)
+            self._apply_status_penalty(status)
+
+    def _apply_status_penalty(self, status):
+        if status == "burn":
+            self._attack = int(self._attack * 0.5)
+        elif status == "paralyze":
+            self._speed = int(self._speed * 0.5)
+
     def remove_status(self, status):
-        for my_status in self.status:
-            if my_status == status:
-                my_status.remove()
-                self.status.remove(status)
+        if status in self.status:
+            self.status.remove(status)
+            self._remove_status_penalty(status)
 
-    def clear_status(self):
-         for my_status in self.status:
-            self.remove_status(my_status)
+    def _remove_status_penalty(self, status):
+        if status == "burn":
+            self._attack = self._compute_stat("attack", self.base_data["attack"])
+        elif status == "paralyze":
+            self._speed = self._compute_stat("speed", self.base_data["speed"])
 
-    def status_effect(self):
-        for status in self.status:
-            status.end_turn()
-
-    def compute_stat(self, stat_name, val):
-        if stat_name == 'hp':
-            return int((2 * val + 31 + (252 / 4)) + self.level + 10)
+    def calculate_damage(self, move_name, target):
+        with open("moves.json") as f:
+            move_data = json.load(f)[move_name]
+        
+        # Determine attacking stats
+        if move_data["category"] == "Physical":
+            attack = self.attack
+            defense = target.defense
         else:
-            return int((2 * val + 31) + 5)
+            attack = self.sp_atk
+            defense = target.sp_def
 
-    def move(self):
-        if self.next_move:
-            self.next_move()
-
-    def select_move(self):
-        for no_move, move in enumerate(self._moves, 1):
-            print(f"{no_move} - {move}")
-            print()
-
-        while True:
-            move_selection = input(f"\nSelect move for {self.name}: ")
-            print()
-
-            try:
-                move_index = int(move_selection) - 1
-                if 0 <= move_index < len(self._moves):
-                    selected_move = self._moves[move_index]
-                    if selected_move.pp > 0:
-                        selected_move.pp -= 1
-                        self.next_move = selected_move
-                        break
-                    else:
-                        print("You have no more PP for this move. Choose another one.")
-                        print()
-                if self.active is False:
-                    self.next_move = move_fac.make('cant_move', self)
-                    print(f"{self.name} can't move as its status is currently: {self.status}!")
-
-            except ValueError:
-                pass
-            
-            print("Invalid input. Please choose a number between 1 and", len(self._moves))
-            print()
-
-        return self.next_move
+        # Type effectiveness
+        effectiveness = 1
+        for target_type in target.types:
+            effectiveness *= TYPE_EFFECTIVENESS[move_data["type"]].get(target_type, 1)
+        
+        # STAB calculation
+        stab = 1.5 if move_data["type"] in self.types else 1
+        
+        # Critical hit
+        critical = 1.5 if random.random() < (0.125 if move_name == "Stone_Edge" else 0.04167) else 1
+        
+        # Damage formula
+        damage = (((2 * 100 / 5) + 2) * move_data["power"] * attack / defense)
+        damage = (damage / 50) + 2
+        modifier = effectiveness * stab * critical * random.uniform(0.85, 1)
+        
+        return ceil(damage * modifier)
