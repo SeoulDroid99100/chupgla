@@ -1,5 +1,5 @@
 import random
-from base import Item
+from .base import Item
 
 class Status(Item):
     def __eq__(self, rhs):
