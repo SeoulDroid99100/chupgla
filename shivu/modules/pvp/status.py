@@ -1,119 +1,124 @@
+# shivu/modules/pvp/status.py
 import random
-from .base import Item
+from .base import Item  # Relative import
 
-class Status(Item):
+
+class Status(Item):  # Inherit from Item
     def __eq__(self, rhs):
         try:
             eq = self.name == rhs.name
         except AttributeError:
             eq = self.name == rhs
-
         return eq
 
     def __repr__(self):
-        return self.name
+        return self.name  # For cleaner display in status lists
 
     def bind(self, user):
         self.user = user
 
     def start(self):
-        pass
+        """Called when the status is first applied."""
+        pass  # Default: no action
 
     def end_turn(self):
-        pass
+        """Called at the end of each turn the status is active."""
+        pass  # Default: no action
 
     def remove(self):
-        pass
+        """Called when the status is removed."""
+        pass # Default no action
 
-# What happens at the start and at the end of the turn the Pokemon gets a status effect
-# start means at the turn the Pokemon first receives the status effect, it only occurs that one time
-# end_turn means at the end of every single turn the Pokemon has that status effect
-# user refers to the Pokemon that gets this status condition
+
 class flinch(Status):
     name = 'flinch'
+
     def start(self):
-        user = self.user
-        user.active = False
+        self.user.active = False  # Prevent action on the turn flinch is applied
 
     def end_turn(self):
-        user = self.user
-        user.active = True
-        user.remove_status(self)
-        print(f"{user.player[1]}'s {user.name} can't move as it flinched!")
+        # Flinch only lasts for one turn, so we remove it
+        self.user.active = True
+        self.user.remove_status(self)
+        print(f"{self.user.player[1]}'s {self.user.name} can't move as it flinched!")
         print()
- 
+
 class poison(Status):
     name = 'poison'
+
     def start(self):
-        user = self.user
-        print(f"{user.player[1]}'s {user.name} is poisoned!")
+        print(f"{self.user.player[1]}'s {self.user.name} is poisoned!")
         print()
 
     def end_turn(self):
-        user = self.user
-        hp_loss = int(user.max_hp / 8)
-        user.hp -= hp_loss
-        print(f"{user.player[1]}'s {user.name} lost {hp_loss} HP due to the poison!")
+        hp_loss = int(self.user.max_hp / 8)
+        self.user.hp -= hp_loss
+        print(f"{self.user.player[1]}'s {self.user.name} lost {hp_loss} HP due to the poison!")
         print()
- 
+
+
 class bad_poison(Status):
     name = 'bad_poison'
+
     def start(self):
-        user = self.user
-        self.poison_level = 1
-        print(f"{user.player[1]}'s {user.name} is badly poisoned!")
+        self.poison_level = 1  # Increasing damage each turn
+        print(f"{self.user.player[1]}'s {self.user.name} is badly poisoned!")
         print()
 
     def end_turn(self):
-        user = self.user
-        hp_loss = int(user.max_hp * self.poison_level * (1 / 16))
-        user.hp -= hp_loss
-        print(f"{user.player[1]}'s {user.name} lost {hp_loss} HP due to the bad poison!")
+        hp_loss = int(self.user.max_hp * self.poison_level * (1 / 16))
+        self.user.hp -= hp_loss
+        print(f"{self.user.player[1]}'s {self.user.name} lost {hp_loss} HP due to the bad poison!")
         print()
         self.poison_level += 1
 
+
 class sleep(Status):
     name = 'sleep'
+
+    def __init__(self, t_sleep=None):
+        # Number of turns for normal sleep,
+        self.t_sleep = t_sleep if t_sleep else random.randint(1, 3)  # 1-3 turns of sleep
+
     def start(self):
-        user = self.user
-        user.active = False
- 
+        self.user.active = False # Pokemon cannot do actions while sleep
+        print(f"{self.user.player[1]}'s {self.user.name} fell asleep!")
+        print()
+
     def end_turn(self):
-        user = self.user
         self.t_sleep -= 1
-
         if self.t_sleep > 0:
-            print(f"{user.player[1]}'s {user.name} can't move as it is currently asleep!")
-            print()
-
+             print(f"{self.user.player[1]}'s {self.user.name} is fast asleep!")
+             print()
         if self.t_sleep == 0:
             self.user.remove_status('sleep')
-            print(f"{user.player[1]}'s {user.name} woke up! But it can't move just yet!")
+            print(f"{self.user.player[1]}'s {self.user.name} woke up! But it can't move just yet!")
             print()
 
+
     def remove(self):
-        user = self.user
-        user.active = True
+        self.user.active = True
+
 
 class burn(Status):
     name = 'burn'
+
     def start(self):
-        user = self.user
-        print(f"{user.player[1]}'s {user.name} is burned!")
+        print(f"{self.user.player[1]}'s {self.user.name} was burned!")
         print()
 
     def end_turn(self):
-        user = self.user
-        hp_loss = int(user.max_hp / 16)
-        user.hp -= hp_loss
-        print(f"{user.player[1]}'s {user.name} has lost {hp_loss} HP due to the burn!")
+        hp_loss = int(self.user.max_hp / 16)
+        self.user.hp -= hp_loss
+        print(f"{self.user.player[1]}'s {self.user.name} lost {hp_loss} HP due to the burn!")
         print()
+
 
 class leech_seed(Status):
     name = 'leech_seed'
+
     def start(self):
-        user = self.user
-        print(f"{user.player[1]}'s {user.name} is seeded!")
+        print(f"{self.user.player[1]}'s {self.user.name} was seeded!")
         print()
 
     def end_turn(self):
@@ -122,24 +127,31 @@ class leech_seed(Status):
         hp_change = int(user.max_hp / 8)
         user.hp -= hp_change
         opp.hp += hp_change
-        print(f"{user.player[1]}'s {user.name} lost {hp_change} HP due to the Leech_Seed!")
+
+        # Make sure not overpass the max_hp
+        if opp.hp > opp.max_hp:
+            opp.hp = opp.max_hp
+
+        print(f"{user.player[1]}'s {user.name} lost {hp_change} HP due to Leech Seed!")
         print()
-        print(f"{opp.player[1]}'s {opp.name} has gained {hp_change} HP from {user.player[1]}'s {user.name} due to Leech_Seed!")
+        print(f"{opp.player[1]}'s {opp.name} has gained {hp_change} HP from {user.player[1]}'s {user.name} due to Leech Seed!")
         print()
+        
 
 class paralyse(Status):
     name = 'paralyse'
+
     def start(self):
         user = self.user
-        user.speed /= 2
-        print(f"{user.player[1]}'s {user.name} is paralysed!")
+        user.speed /= 2  #Paralysis cuts speed in half.
+        print(f"{user.player[1]}'s {user.name} is paralysed! It may be unable to move!")
         print()
 
     def end_turn(self):
         user = self.user
         if random.random() < 0.25:
-            user.active = False
-            print(f"{user.player[1]}'s {user.name} is fully paralysed! It can't move in the next turn!")
+            user.active = False #  25% chance of being fully paralyzed
+            print(f"{user.player[1]}'s {user.name} is fully paralysed!")
             print()
 
         else:
@@ -147,8 +159,9 @@ class paralyse(Status):
 
     def remove(self):
         user = self.user
-        user.speed *= 2
-        user.active = True
+        user.speed *= 2 # Restore speed
+        user.active = True # Restore flag
+
 
 class freeze(Status):
     name = 'freeze'
