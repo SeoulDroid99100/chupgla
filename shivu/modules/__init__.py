@@ -3,6 +3,8 @@
 import logging
 import sys
 import time
+import glob
+from os.path import basename, dirname, isfile
 
 StartTime = time.time()
 
@@ -14,7 +16,7 @@ logging.basicConfig(
 )
 
 logging.getLogger("apscheduler").setLevel(logging.ERROR)
-
+logging.getLogger("httpx").setLevel(logging.WARNING)  # Keep this, as it seems to be a dependency
 logging.getLogger("pyrate_limiter").setLevel(logging.ERROR)
 LOGGER = logging.getLogger(__name__)
 
@@ -39,6 +41,8 @@ def __list_all_modules():
         for f in mod_paths
         if isfile(f) and f.endswith(".py") and not f.endswith("__init__.py")
     ]
+     # Include subpackages explicitly
+    all_modules.append("lpvp") # CRUCIAL: Add the lpvp package
 
     if LOAD or NO_LOAD:
         to_load = LOAD
@@ -66,6 +70,5 @@ def __list_all_modules():
 
 
 ALL_MODULES = __list_all_modules()
- #Add to the list for the bot to import
 LOGGER.info("Modules to load: %s", str(ALL_MODULES))
 __all__ = ALL_MODULES + ["ALL_MODULES"]
