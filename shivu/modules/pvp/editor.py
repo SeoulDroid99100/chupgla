@@ -1,16 +1,19 @@
-from shivu import shivuu, xy
+from shivu import shivuu, xy  # Import shivuu HERE
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, Message
+from pyrogram.handlers import MessageHandler, CallbackQueryHandler # Add these.
 import json
 from typing import Dict, List, Union
 from bson.objectid import ObjectId
 
-# Load Pokémon data
+# Load Pokémon data - Corrected path
 with open("shivu/modules/pvp/pokemons.json") as f:
     POKEMONS: Dict[str, dict] = json.load(f)
 POKE_NAMES = list(POKEMONS.keys())
 ITEMS_PER_PAGE = 8
 
+# ... (All your existing functions from editor.py) ...
+# Put all your current editor.py content here.
 async def get_user(user_id: int) -> dict:
     user = await xy.find_one({"_id": user_id})
     if not user:
@@ -31,7 +34,7 @@ async def switch_active_team(user_id: int, new_index: int):
         {"_id": user_id},
         {"$set": {"active_team": new_index}}
     )
-
+    
 def create_view_buttons(active_team: int, is_editing: bool = False) -> InlineKeyboardMarkup:
     buttons = []
     if not is_editing:
@@ -66,7 +69,7 @@ def create_pokemon_list(page: int) -> InlineKeyboardMarkup:
     start = page * ITEMS_PER_PAGE
     end = start + ITEMS_PER_PAGE
     buttons = []
-    
+
     # Add Pokémon buttons (2 per row)
     for i in range(start, end, 2):
         row = []
@@ -80,7 +83,7 @@ def create_pokemon_list(page: int) -> InlineKeyboardMarkup:
                 )
         if row:
             buttons.append(row)
-    
+
     # Pagination controls
     pagination = []
     if page > 0:
@@ -89,9 +92,10 @@ def create_pokemon_list(page: int) -> InlineKeyboardMarkup:
         pagination.append(InlineKeyboardButton("Next ➡️", callback_data=f"page:{page+1}"))
     if pagination:
         buttons.append(pagination)
-    
+
     buttons.append([InlineKeyboardButton("🔙 Back", callback_data="exit_pagination")])
     return InlineKeyboardMarkup(buttons)
+# --- Handlers using @shivuu.on_... decorators ---
 
 @shivuu.on_message(filters.command("myteam"))
 async def myteam_handler(client, message: Message):
@@ -108,7 +112,6 @@ async def myteam_handler(client, message: Message):
         text,
         reply_markup=create_view_buttons(user["active_team"])
     )
-
 @shivuu.on_callback_query()
 async def callback_handler(client, callback: CallbackQuery):
     data = callback.data
