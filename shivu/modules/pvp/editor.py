@@ -1,12 +1,19 @@
-from shivu import shivuu, xy  # Import shivuu HERE
+from shivu import shivuu, xy
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, Message
 import json
+import random
 from typing import Dict, List
 
 # Load Pokémon data
-with open("shivu/modules/pvp/pokemons.json") as f:
+with open("pokemons.json") as f:
     POKEMONS: Dict[str, dict] = json.load(f)
+    
+with open("coef_type.json") as f:
+    coef_type = json.load(f)
+
+coef_stage = [2/8, 2/7, 2/6, 2/5, 2/4, 2/3, 2/2, 3/2, 4/2, 5/2, 6/2, 7/2, 8/2]
+
 POKE_NAMES = list(POKEMONS.keys())
 ITEMS_PER_PAGE = 8
 
@@ -29,7 +36,30 @@ async def switch_active_team(user_id: int, new_index: int):
         {"_id": user_id},
         {"$set": {"active_team": new_index}}
     )
-    
+
+def compute_stat(stat_name, val):
+    if stat_name == "hp":
+        return int((2*val + 31 + (252/4)) + 100 + 10  # Level 100
+    return int((2*val + 31) + 5)  # Level 100
+
+async def create_pokemon_object(pokemon_name: str):
+    base = POKEMONS[pokemon_name]
+    return {
+        "name": pokemon_name,
+        "max_hp": compute_stat("hp", base["hp"]),
+        "hp": compute_stat("hp", base["hp"]),
+        "attack": compute_stat("attack", base["attack"]),
+        "defense": compute_stat("defense", base["defense"]),
+        "sp_atk": compute_stat("sp_atk", base["sp_atk"]),
+        "sp_def": compute_stat("sp_def", base["sp_def"]),
+        "speed": compute_stat("speed", base["speed"]),
+        "type": base["type"],
+        "moves": base["moves"],
+        "stages": {stat: 0 for stat in ["attack", "defense", "sp_atk", "sp_def", "speed"]},
+        "status": [],
+        "active": True
+    }
+
 def create_view_buttons(active_team: int, is_editing: bool = False) -> InlineKeyboardMarkup:
     buttons = []
     if not is_editing:
@@ -91,7 +121,7 @@ async def myteam_handler(client, message: Message):
     
     text = f"**{team['name']}** ({len(team['pokemons'])}/6)\n\n"
     text += "\n".join(
-        f"**{p['name']}** - Lv. 100"
+        f"**{p['name']}** - Lv. 100 | HP: {p['hp']}/{p['max_hp']}"
         for p in team["pokemons"]
     )
     
@@ -102,13 +132,13 @@ async def myteam_handler(client, message: Message):
 
 @shivuu.on_callback_query()
 async def callback_handler(client, callback: CallbackQuery):
-    # Verify user permission
     if not (callback.message.reply_to_message and callback.message.reply_to_message.from_user):
-        await callback.answer("This menu is invalid.", show_alert=True)
+        await callback.answer("Invalid menu.", show_alert=True)
         return
+        
     original_user_id = callback.message.reply_to_message.from_user.id
     if callback.from_user.id != original_user_id:
-        await callback.answer("Only the command user can interact!", show_alert=True)
+        await callback.answer("Interaction restricted!", show_alert=True)
         return
 
     data = callback.data
@@ -118,7 +148,7 @@ async def callback_handler(client, callback: CallbackQuery):
     if data.startswith("team_view"):
         new_index = int(data.split(":")[1])
         await switch_active_team(user_id, new_index)
-        await callback.answer(f"Switched to Team {new_index+1}")
+        await callback.answer(f"Team {new_index+1} active!")
         await update_team_display(callback, new_index)
     
     elif data == "enter_edit":
@@ -139,16 +169,17 @@ async def callback_handler(client, callback: CallbackQuery):
         )
     
     elif data.startswith("add:"):
-        pokemon = data.split(":")[1]
+        pokemon_name = data.split(":")[1]
         team = user["teams"][user["active_team"]]
         
         if len(team["pokemons"]) >= 6:
-            await callback.answer("Team is full!", show_alert=True)
+            await callback.answer("Team full!", show_alert=True)
             return
             
-        team["pokemons"].append({"name": pokemon, "level": 100})
+        new_pokemon = await create_pokemon_object(pokemon_name)
+        team["pokemons"].append(new_pokemon)
         await update_team(user_id, user["active_team"], team)
-        await callback.answer(f"Added {pokemon}!")
+        await callback.answer(f"Added {pokemon_name}!")
         await update_team_display(callback, user["active_team"], edit_mode=True)
     
     elif data == "remove_poke":
@@ -192,7 +223,7 @@ async def update_team_display(callback: CallbackQuery, team_index: int, edit_mod
     
     text = f"**{team['name']}** ({len(team['pokemons'])}/6)\n\n"
     text += "\n".join(
-        f"**{p['name']}** - Lv. 100"
+        f"**{p['name']}** - HP: {p['hp']}/{p['max_hp']} | Status: {', '.join(p['status']) or 'Normal'}"
         for p in team["pokemons"]
     )
     
