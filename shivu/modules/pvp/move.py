@@ -1,98 +1,103 @@
+# shivu/modules/pvp/move.py
+
 import json
 import random
 from math import ceil
-from .base import Item, coef_type
-from .status import *
+from .base import Item, coef_type # Relative Import
 
-# The critical hit ratio for all attacking moves (without a high critical hit ratio)
+# The rest of this file is largely the same as your corrected version,
+# with minor adjustments to remove unnecessary parameters and use
+# instance attributes.
+
+# Constants
 NORMAL_CRITICAL = 0.04167
 
 class Move(Item):
-	seperator = ' | '
+    seperator = ' | '
 
-	def __init__(self, name, user, opp=None, description=None, **kwargs):
-		super().__init__(name=name, **kwargs)
-		self.user = user
-		if opp is None:
-			opp = user.opp
-		self.description = description
-		self.opp = opp
-		self.critical = NORMAL_CRITICAL
-		self.effect = globals().get('_' + self.name.lower(), _normal_attack)
+    def __init__(self, name, user, opp=None, description=None, **kwargs):
+        super().__init__(name=name, **kwargs)
+        self.user = user
+        if opp is None:
+            opp = user.opp
+        self.description = description
+        self.opp = opp
+        self.critical = NORMAL_CRITICAL
+        self.effect = globals().get('_' + self.name.lower(), _normal_attack)
 
-	def __repr__(self):
-		return super().__repr__() + '\n' + self.description
+    def __repr__(self):
+        return super().__repr__() + '\n' + self.description
 
-	def __call__(self):
-		if self.user.active:
-			self.effect(self)
+    def __call__(self):
+        if self.user.active:
+            self.effect(self)
 
-	# Physical moves use the Attack stat of the user and Defense stat of the target for damage calculation.
-	# Special moves use the Sp_Atk stat of the user and Sp_Def stat of the target for damage calculation.
-	# user refers to the Pokemon using the move/attack
-	# opp refers to the Pokemon that will be taking/receiving damage from the move/attack
-	def attack(self):
-		user, opp = self.user, self.opp
-		if self.category == 'Physical':
-			A = user.attack
-			D = opp.defense
+    # Physical moves use the Attack stat of the user and Defense stat of the target for damage calculation.
+    # Special moves use the Sp_Atk stat of the user and Sp_Def stat of the target for damage calculation.
+    # user refers to the Pokemon using the move/attack
+    # opp refers to the Pokemon that will be taking/receiving damage from the move/attack
+    def attack(self):
+        user, opp = self.user, self.opp
+        if self.category == 'Physical':
+            A = user.attack
+            D = opp.defense
 
-		elif self.category == 'Special':
-			A = user.sp_atk
-			D = opp.sp_def
-		
-		# Finds the resultant type effectiveness if the target is a dual-type Pokemon. If its a single type Pokemon it will work as well
-		coef_type_dual = 1
-		for type_name in opp.type:
-			coef_type_dual *= coef_type[self.type][type_name]
+        elif self.category == 'Special':
+            A = user.sp_atk
+            D = opp.sp_def
+        
+        # Finds the resultant type effectiveness if the target is a dual-type Pokemon. If its a single type Pokemon it will work as well
+        coef_type_dual = 1
+        for type_name in opp.type:
+            coef_type_dual *= coef_type[self.type][type_name]
 
-		# A super-effective move based on the move's type and the target's type
-		if coef_type_dual > 1:
-			print('The move is super effective!')
-			print()
+        # A super-effective move based on the move's type and the target's type
+        if coef_type_dual > 1:
+            print('The move is super effective!')
+            print()
 
-		# A not very effective move based on the move's type and the target's type
-		elif coef_type_dual < 1 and coef_type_dual > 0:
-			print('The move is not very effective...')
-			print()
+        # A not very effective move based on the move's type and the target's type
+        elif coef_type_dual < 1 and coef_type_dual > 0:
+            print('The move is not very effective...')
+            print()
 
-		# If the target Pokemon is immune to a move of a particular type, due to the target Pokemon's type
-		elif coef_type_dual == 0:
-			print(f"It didn't even affect {opp.player[1]}'s {opp.name} at all...")
+        # If the target Pokemon is immune to a move of a particular type, due to the target Pokemon's type
+        elif coef_type_dual == 0:
+            print(f"It didn't even affect {opp.player[1]}'s {opp.name} at all...")
 
-		# For damage calculation
-		modifier = random.uniform(0.85, 1)*coef_type_dual
-		# If it is a critical hit
-		critical_check = False
-		if random.random() < self.critical:
-			critical_check = True
-			modifier *= 1.5
+        # For damage calculation
+        modifier = random.uniform(0.85, 1)*coef_type_dual
+        # If it is a critical hit
+        critical_check = False
+        if random.random() < self.critical:
+            critical_check = True
+            modifier *= 1.5
 
-		# If the type of the move is the same as that of the user, so as to receive Same Type Attack Bonus (STAB)
-		if self.type in user.type:
-			modifier *= 1.5
+        # If the type of the move is the same as that of the user, so as to receive Same Type Attack Bonus (STAB)
+        if self.type in user.type:
+            modifier *= 1.5
 
-		# If the user is burned, its Physical attacking moves will only have half as much power
-		if 'burn' in self.user.status and self.category == 'Physical':
-			modifier *= 0.5
+        # If the user is burned, its Physical attacking moves will only have half as much power
+        if 'burn' in self.user.status and self.category == 'Physical':
+            modifier *= 0.5
 
-		# Damage calculation
-		damage = ceil(((2*user.level/5 + 2)*self.power*A/D/50 + 2)*modifier)
-		if random.random() > self.accuracy:
-			print('The attack missed!')
-			print()
-			damage = 0
+        # Damage calculation
+        damage = ceil(((2*user.level/5 + 2)*self.power*A/D/50 + 2)*modifier)
+        if random.random() > self.accuracy:
+            print('The attack missed!')
+            print()
+            damage = 0
 
-		else:
-			opp.hp -= damage
+        else:
+            opp.hp -= damage
 
-		if damage > 0 and critical_check == True:
-			print ("It's a critical hit!")
-			print()
+        if damage > 0 and critical_check == True:
+            print ("It's a critical hit!")
+            print()
 
-		print(f"{self.opp.player[1]}'s {self.opp.name} lost {damage} HP due to {self.user.player[1]}'s {self.user.name}'s {self.name}!")
-		print()
-		return damage
+        print(f"{self.opp.player[1]}'s {self.opp.name} lost {damage} HP due to {self.user.player[1]}'s {self.user.name}'s {self.name}!")
+        print()
+        return damage
 
 # For moves that only deal damage without any effects/secondary effects
 # user refers to the Pokemon that is using the move/attack
