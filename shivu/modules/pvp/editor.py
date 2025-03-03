@@ -1,29 +1,51 @@
+# shivu/modules/pvp/editor.py
 from shivu import shivuu, xy
 from pyrogram import filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, Message
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
 import json
-import random
 from typing import Dict, List
 
 # Load Pokémon data
 with open("pokemons.json") as f:
     POKEMONS: Dict[str, dict] = json.load(f)
     
-with open("coef_type.json") as f:
-    coef_type = json.load(f)
-
-coef_stage = [2/8, 2/7, 2/6, 2/5, 2/4, 2/3, 2/2, 3/2, 4/2, 5/2, 6/2, 7/2, 8/2]
-
 POKE_NAMES = list(POKEMONS.keys())
 ITEMS_PER_PAGE = 8
+MAX_TEAM_SIZE = 6
 
 async def get_user(user_id: int) -> dict:
     user = await xy.find_one({"_id": user_id})
     if not user:
-        teams = [{"name": f"Team {i+1}", "pokemons": []} for i in range(6)]
-        user = {"_id": user_id, "active_team": 0, "teams": teams}
+        teams = [{
+            "name": f"Team {i+1}",
+            "pokemons": [],
+            "active": False
+        } for i in range(6)]
+        teams[0]["active"] = True
+        user = {"_id": user_id, "teams": teams}
         await xy.insert_one(user)
     return user
+
+async def create_pokemon_object(pokemon_name: str) -> dict:
+    base = POKEMONS[pokemon_name]
+    return {
+        "name": pokemon_name,
+        "type": base["type"],
+        "hp": calculate_stat("hp", base["hp"]),
+        "attack": calculate_stat("attack", base["attack"]),
+        "defense": calculate_stat("defense", base["defense"]),
+        "sp_atk": calculate_stat("sp_atk", base["sp_atk"]),
+        "sp_def": calculate_stat("sp_def", base["sp_def"]),
+        "speed": calculate_stat("speed", base["speed"]),
+        "moves": base["moves"][:4],
+        "status": [],
+        "stages": {stat: 0 for stat in ["attack", "defense", "sp_atk", "sp_def", "speed"]}
+    }
+
+def calculate_stat(stat_name: str, base_value: int) -> int:
+    if stat_name == "hp":
+        return int((2 * base_value + 31 + 63) + 100 + 10)  # Level 100
+    return int(((2 * base_value + 31) * 100 / 100) + 5)
 
 async def update_team(user_id: int, team_index: int, team_data: dict):
     await xy.update_one(
@@ -31,203 +53,177 @@ async def update_team(user_id: int, team_index: int, team_data: dict):
         {"$set": {f"teams.{team_index}": team_data}}
     )
 
-async def switch_active_team(user_id: int, new_index: int):
-    await xy.update_one(
-        {"_id": user_id},
-        {"$set": {"active_team": new_index}}
-    )
-
-def compute_stat(stat_name, val):
-    if stat_name == "hp":
-        return int((2*val + 31 + (252/4)) + 100 + 10  # Level 100
-    return int((2*val + 31) + 5)  # Level 100
-
-async def create_pokemon_object(pokemon_name: str):
-    base = POKEMONS[pokemon_name]
-    return {
-        "name": pokemon_name,
-        "max_hp": compute_stat("hp", base["hp"]),
-        "hp": compute_stat("hp", base["hp"]),
-        "attack": compute_stat("attack", base["attack"]),
-        "defense": compute_stat("defense", base["defense"]),
-        "sp_atk": compute_stat("sp_atk", base["sp_atk"]),
-        "sp_def": compute_stat("sp_def", base["sp_def"]),
-        "speed": compute_stat("speed", base["speed"]),
-        "type": base["type"],
-        "moves": base["moves"],
-        "stages": {stat: 0 for stat in ["attack", "defense", "sp_atk", "sp_def", "speed"]},
-        "status": [],
-        "active": True
-    }
-
-def create_view_buttons(active_team: int, is_editing: bool = False) -> InlineKeyboardMarkup:
+def create_team_buttons(teams: List[dict], edit_mode: bool = False) -> InlineKeyboardMarkup:
     buttons = []
-    if not is_editing:
-        for i in range(0, 6, 2):
-            row = [
-                InlineKeyboardButton(
-                    f"Team {i+1}" + (" (Active)" if active_team == i else ""),
-                    callback_data=f"team_view:{i}"
-                ) for i in range(i, min(i+2, 6))
-            ]
-            buttons.append(row)
-        buttons.append([InlineKeyboardButton("Edit", callback_data="enter_edit")])
-    else:
+    for i, team in enumerate(teams):
+        status = "★" if team["active"] else ""
+        text = f"Team {i+1} {status}"
+        if edit_mode:
+            callback_data = f"edit_team:{i}"
+        else:
+            callback_data = f"view_team:{i}"
+        buttons.append([InlineKeyboardButton(text, callback_data=callback_data)])
+    
+    if edit_mode:
         buttons.append([
             InlineKeyboardButton("Add Pokémon", callback_data="add_poke:0"),
-            InlineKeyboardButton("Remove", callback_data="remove_poke")
+            InlineKeyboardButton("Back", callback_data="exit_edit")
         ])
-        for i in range(0, 6, 2):
-            row = [
-                InlineKeyboardButton(
-                    f"Team {j+1}" + (" (Active)" if active_team == j else ""),
-                    callback_data=f"team_edit:{j}"
-                ) for j in range(i, min(i+2, 6))
-            ]
-            buttons.append(row)
-        buttons.append([InlineKeyboardButton("Save", callback_data="save_team")])
+    else:
+        buttons.append([
+            InlineKeyboardButton("Edit Teams", callback_data="enter_edit"),
+            InlineKeyboardButton("Close", callback_data="close_teams")
+        ])
     return InlineKeyboardMarkup(buttons)
 
-def create_pokemon_list(page: int) -> InlineKeyboardMarkup:
+def create_pokemon_buttons(page: int) -> InlineKeyboardMarkup:
     start = page * ITEMS_PER_PAGE
     end = start + ITEMS_PER_PAGE
     buttons = []
+    
     for i in range(start, end, 2):
         row = []
-        for j in range(i, min(i+2, end)):
+        for j in (i, i+1):
             if j < len(POKE_NAMES):
-                row.append(
-                    InlineKeyboardButton(
-                        POKE_NAMES[j],
-                        callback_data=f"add:{POKE_NAMES[j]}"
-                    )
-                )
+                row.append(InlineKeyboardButton(
+                    POKE_NAMES[j], 
+                    callback_data=f"select_poke:{POKE_NAMES[j]}"
+                ))
         if row:
             buttons.append(row)
-    pagination = []
+    
+    nav_buttons = []
     if page > 0:
-        pagination.append(InlineKeyboardButton("Prev", callback_data=f"page:{page-1}"))
+        nav_buttons.append(InlineKeyboardButton("◀ Previous", callback_data=f"page:{page-1}"))
     if end < len(POKE_NAMES):
-        pagination.append(InlineKeyboardButton("Next", callback_data=f"page:{page+1}"))
-    if pagination:
-        buttons.append(pagination)
-    buttons.append([InlineKeyboardButton("Back", callback_data="exit_pagination")])
+        nav_buttons.append(InlineKeyboardButton("Next ▶", callback_data=f"page:{page+1}"))
+    
+    if nav_buttons:
+        buttons.append(nav_buttons)
+    
+    buttons.append([InlineKeyboardButton("Cancel", callback_data="cancel_selection")])
     return InlineKeyboardMarkup(buttons)
 
 @shivuu.on_message(filters.command("myteam"))
 async def myteam_handler(client, message: Message):
     user = await get_user(message.from_user.id)
-    team = user["teams"][user["active_team"]]
+    active_team = next(t for t in user["teams"] if t["active"])
     
-    text = f"**{team['name']}** ({len(team['pokemons'])}/6)\n\n"
-    text += "\n".join(
-        f"**{p['name']}** - Lv. 100 | HP: {p['hp']}/{p['max_hp']}"
-        for p in team["pokemons"]
-    )
+    text = f"**Your Active Team** ({len(active_team['pokemons'])}/{MAX_TEAM_SIZE})\n\n"
+    for poke in active_team["pokemons"]:
+        text += f"- {poke['name']} (HP: {poke['hp']}/{poke['hp']})\n"
     
     await message.reply_text(
         text,
-        reply_markup=create_view_buttons(user["active_team"])
+        reply_markup=create_team_buttons(user["teams"])
     )
 
-@shivuu.on_callback_query()
-async def callback_handler(client, callback: CallbackQuery):
-    if not (callback.message.reply_to_message and callback.message.reply_to_message.from_user):
-        await callback.answer("Invalid menu.", show_alert=True)
-        return
-        
-    original_user_id = callback.message.reply_to_message.from_user.id
-    if callback.from_user.id != original_user_id:
-        await callback.answer("Interaction restricted!", show_alert=True)
-        return
-
-    data = callback.data
-    user_id = callback.from_user.id
-    user = await get_user(user_id)
-    
-    if data.startswith("team_view"):
-        new_index = int(data.split(":")[1])
-        await switch_active_team(user_id, new_index)
-        await callback.answer(f"Team {new_index+1} active!")
-        await update_team_display(callback, new_index)
-    
-    elif data == "enter_edit":
-        await callback.message.edit_reply_markup(
-            create_view_buttons(user["active_team"], is_editing=True)
-        )
-    
-    elif data.startswith("team_edit"):
-        team_index = int(data.split(":")[1])
-        await switch_active_team(user_id, team_index)
-        await callback.answer(f"Editing Team {team_index+1}")
-        await update_team_display(callback, team_index, edit_mode=True)
-    
-    elif data.startswith("add_poke"):
-        page = int(data.split(":")[1])
-        await callback.message.edit_reply_markup(
-            create_pokemon_list(page)
-        )
-    
-    elif data.startswith("add:"):
-        pokemon_name = data.split(":")[1]
-        team = user["teams"][user["active_team"]]
-        
-        if len(team["pokemons"]) >= 6:
-            await callback.answer("Team full!", show_alert=True)
-            return
-            
-        new_pokemon = await create_pokemon_object(pokemon_name)
-        team["pokemons"].append(new_pokemon)
-        await update_team(user_id, user["active_team"], team)
-        await callback.answer(f"Added {pokemon_name}!")
-        await update_team_display(callback, user["active_team"], edit_mode=True)
-    
-    elif data == "remove_poke":
-        team = user["teams"][user["active_team"]]
-        buttons = [
-            [InlineKeyboardButton(
-                p["name"], callback_data=f"remove:{i}"
-            )] for i, p in enumerate(team["pokemons"])
-        ]
-        buttons.append([InlineKeyboardButton("Back", callback_data="exit_remove")])
-        await callback.message.edit_reply_markup(InlineKeyboardMarkup(buttons))
-    
-    elif data.startswith("remove:"):
-        index = int(data.split(":")[1])
-        team = user["teams"][user["active_team"]]
-        
-        if 0 <= index < len(team["pokemons"]):
-            removed = team["pokemons"].pop(index)
-            await update_team(user_id, user["active_team"], team)
-            await callback.answer(f"Removed {removed['name']}!")
-            await update_team_display(callback, user["active_team"], edit_mode=True)
-    
-    elif data == "save_team":
-        await callback.answer("Team saved!")
-        await update_team_display(callback, user["active_team"])
-    
-    elif data.startswith("page:"):
-        page = int(data.split(":")[1])
-        await callback.message.edit_reply_markup(
-            create_pokemon_list(page)
-        )
-    
-    elif data in ["exit_pagination", "exit_remove"]:
-        await callback.message.edit_reply_markup(
-            create_view_buttons(user["active_team"], is_editing=True)
-        )
-
-async def update_team_display(callback: CallbackQuery, team_index: int, edit_mode: bool = False):
+@shivuu.on_callback_query(filters.regex(r"^view_team:"))
+async def view_team_handler(client, callback: CallbackQuery):
     user = await get_user(callback.from_user.id)
-    team = user["teams"][team_index]
+    team_index = int(callback.data.split(":")[1])
     
-    text = f"**{team['name']}** ({len(team['pokemons'])}/6)\n\n"
-    text += "\n".join(
-        f"**{p['name']}** - HP: {p['hp']}/{p['max_hp']} | Status: {', '.join(p['status']) or 'Normal'}"
-        for p in team["pokemons"]
-    )
+    team = user["teams"][team_index]
+    text = f"**Team {team_index+1}** ({len(team['pokemons'])}/{MAX_TEAM_SIZE})\n\n"
+    text += "\n".join([f"- {p['name']}" for p in team["pokemons"]])
     
     await callback.message.edit_text(
         text,
-        reply_markup=create_view_buttons(team_index, is_editing=edit_mode)
+        reply_markup=create_team_buttons(user["teams"])
+    )
+
+@shivuu.on_callback_query(filters.regex(r"^enter_edit$"))
+async def enter_edit_mode(client, callback: CallbackQuery):
+    user = await get_user(callback.from_user.id)
+    await callback.message.edit_reply_markup(
+        create_team_buttons(user["teams"], edit_mode=True)
+    )
+
+@shivuu.on_callback_query(filters.regex(r"^edit_team:"))
+async def edit_team_handler(client, callback: CallbackQuery):
+    user = await get_user(callback.from_user.id)
+    team_index = int(callback.data.split(":")[1])
+    
+    buttons = [
+        [InlineKeyboardButton(
+            f"❌ {poke['name']}", 
+            callback_data=f"remove_poke:{team_index}:{i}"
+        )] 
+        for i, poke in enumerate(user["teams"][team_index]["pokemons"])
+    ]
+    buttons.append([
+        InlineKeyboardButton("Add Pokémon", callback_data=f"add_poke:{team_index}:0"),
+        InlineKeyboardButton("Back", callback_data="exit_edit")
+    ])
+    
+    await callback.message.edit_text(
+        f"Editing Team {team_index+1}",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+
+@shivuu.on_callback_query(filters.regex(r"^add_poke:"))
+async def add_pokemon_handler(client, callback: CallbackQuery):
+    _, team_index, page = callback.data.split(":")
+    await callback.message.edit_text(
+        "Select a Pokémon to add:",
+        reply_markup=create_pokemon_buttons(int(page))
+    )
+
+@shivuu.on_callback_query(filters.regex(r"^select_poke:"))
+async def select_pokemon_handler(client, callback: CallbackQuery):
+    user = await get_user(callback.from_user.id)
+    pokemon_name = callback.data.split(":")[1]
+    team_index = int(callback.data.split(":")[2]) if ":" in callback.data else 0
+    
+    if len(user["teams"][team_index]["pokemons"]) >= MAX_TEAM_SIZE:
+        await callback.answer("Team is full!", show_alert=True)
+        return
+    
+    new_pokemon = await create_pokemon_object(pokemon_name)
+    user["teams"][team_index]["pokemons"].append(new_pokemon)
+    await update_team(callback.from_user.id, team_index, user["teams"][team_index])
+    
+    await callback.message.edit_text(
+        f"Added {pokemon_name} to Team {team_index+1}!",
+        reply_markup=create_team_buttons(user["teams"], edit_mode=True)
+    )
+
+@shivuu.on_callback_query(filters.regex(r"^remove_poke:"))
+async def remove_pokemon_handler(client, callback: CallbackQuery):
+    user = await get_user(callback.from_user.id)
+    _, team_index, poke_index = callback.data.split(":")
+    team_index = int(team_index)
+    poke_index = int(poke_index)
+    
+    if 0 <= poke_index < len(user["teams"][team_index]["pokemons"]):
+        removed = user["teams"][team_index]["pokemons"].pop(poke_index)
+        await update_team(callback.from_user.id, team_index, user["teams"][team_index])
+        await callback.answer(f"Removed {removed['name']}!")
+    
+    await callback.message.edit_reply_markup(
+        InlineKeyboardMarkup([
+            [InlineKeyboardButton(
+                f"❌ {poke['name']}", 
+                callback_data=f"remove_poke:{team_index}:{i}"
+            )] 
+            for i, poke in enumerate(user["teams"][team_index]["pokemons"])
+        ] + [[
+            InlineKeyboardButton("Add Pokémon", callback_data=f"add_poke:{team_index}:0"),
+            InlineKeyboardButton("Back", callback_data="exit_edit")
+        ]])
+    )
+
+@shivuu.on_callback_query(filters.regex(r"^page:"))
+async def page_handler(client, callback: CallbackQuery):
+    page = int(callback.data.split(":")[1])
+    await callback.message.edit_reply_markup(
+        create_pokemon_buttons(page)
+    )
+
+@shivuu.on_callback_query(filters.regex(r"^(exit_edit|cancel_selection|close_teams)$"))
+async def exit_handler(client, callback: CallbackQuery):
+    user = await get_user(callback.from_user.id)
+    await callback.message.edit_text(
+        "Team Management Closed",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Reopen", callback_data="reopen_teams")]])
     )
