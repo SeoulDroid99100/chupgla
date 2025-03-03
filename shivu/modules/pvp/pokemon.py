@@ -3,7 +3,7 @@
 import json
 from .base import Item, STAT_NAMES, Factory, coef_stage  # Correct relative import
 from .move import Move, NORMAL_CRITICAL # Relative Import
-
+import os
 # The rest of the file is the same as the corrected version you provided,
 # EXCEPT for using the Factory class and using a dictionary for stats:
 
