@@ -4,7 +4,7 @@ from .move import Move
 from .status import *
 import os
 
-os.path.join(os.path.dirname(__file__), 'pvp', 'moves.json')
+os.path.join(os.path.dirname(__file__), 'pvp', 'pokemons.json')
 
 def stat(stat_name):
     stat_name = stat_name.lower()
