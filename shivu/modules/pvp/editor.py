@@ -1,23 +1,18 @@
 from shivu import shivuu, xy  # Import shivuu HERE
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, Message
-from pyrogram.handlers import MessageHandler, CallbackQueryHandler # Add these.
 import json
-from typing import Dict, List, Union
-from bson.objectid import ObjectId
+from typing import Dict, List
 
-# Load Pokémon data - Corrected path
+# Load Pokémon data
 with open("shivu/modules/pvp/pokemons.json") as f:
     POKEMONS: Dict[str, dict] = json.load(f)
 POKE_NAMES = list(POKEMONS.keys())
 ITEMS_PER_PAGE = 8
 
-# ... (All your existing functions from editor.py) ...
-# Put all your current editor.py content here.
 async def get_user(user_id: int) -> dict:
     user = await xy.find_one({"_id": user_id})
     if not user:
-        # Initialize new user with empty teams
         teams = [{"name": f"Team {i+1}", "pokemons": []} for i in range(6)]
         user = {"_id": user_id, "active_team": 0, "teams": teams}
         await xy.insert_one(user)
@@ -38,39 +33,35 @@ async def switch_active_team(user_id: int, new_index: int):
 def create_view_buttons(active_team: int, is_editing: bool = False) -> InlineKeyboardMarkup:
     buttons = []
     if not is_editing:
-        # Team selection buttons (2 per row)
         for i in range(0, 6, 2):
             row = [
                 InlineKeyboardButton(
-                    f"Team {i+1}" + (" ★" if active_team == i else ""),
+                    f"Team {i+1}" + (" (Active)" if active_team == i else ""),
                     callback_data=f"team_view:{i}"
                 ) for i in range(i, min(i+2, 6))
             ]
             buttons.append(row)
-        buttons.append([InlineKeyboardButton("✏️ Edit", callback_data="enter_edit")])
+        buttons.append([InlineKeyboardButton("Edit", callback_data="enter_edit")])
     else:
-        # Edit mode buttons
         buttons.append([
-            InlineKeyboardButton("➕ Add Pokémon", callback_data="add_poke:0"),
-            InlineKeyboardButton("➖ Remove", callback_data="remove_poke")
+            InlineKeyboardButton("Add Pokémon", callback_data="add_poke:0"),
+            InlineKeyboardButton("Remove", callback_data="remove_poke")
         ])
         for i in range(0, 6, 2):
             row = [
                 InlineKeyboardButton(
-                    f"Team {j+1}" + (" ★" if active_team == j else ""),
+                    f"Team {j+1}" + (" (Active)" if active_team == j else ""),
                     callback_data=f"team_edit:{j}"
                 ) for j in range(i, min(i+2, 6))
             ]
             buttons.append(row)
-        buttons.append([InlineKeyboardButton("💾 Save", callback_data="save_team")])
+        buttons.append([InlineKeyboardButton("Save", callback_data="save_team")])
     return InlineKeyboardMarkup(buttons)
 
 def create_pokemon_list(page: int) -> InlineKeyboardMarkup:
     start = page * ITEMS_PER_PAGE
     end = start + ITEMS_PER_PAGE
     buttons = []
-
-    # Add Pokémon buttons (2 per row)
     for i in range(start, end, 2):
         row = []
         for j in range(i, min(i+2, end)):
@@ -83,26 +74,22 @@ def create_pokemon_list(page: int) -> InlineKeyboardMarkup:
                 )
         if row:
             buttons.append(row)
-
-    # Pagination controls
     pagination = []
     if page > 0:
-        pagination.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"page:{page-1}"))
+        pagination.append(InlineKeyboardButton("Prev", callback_data=f"page:{page-1}"))
     if end < len(POKE_NAMES):
-        pagination.append(InlineKeyboardButton("Next ➡️", callback_data=f"page:{page+1}"))
+        pagination.append(InlineKeyboardButton("Next", callback_data=f"page:{page+1}"))
     if pagination:
         buttons.append(pagination)
-
-    buttons.append([InlineKeyboardButton("🔙 Back", callback_data="exit_pagination")])
+    buttons.append([InlineKeyboardButton("Back", callback_data="exit_pagination")])
     return InlineKeyboardMarkup(buttons)
-# --- Handlers using @shivuu.on_... decorators ---
 
 @shivuu.on_message(filters.command("myteam"))
 async def myteam_handler(client, message: Message):
     user = await get_user(message.from_user.id)
     team = user["teams"][user["active_team"]]
     
-    text = f"**Team {team['name']}** ({len(team['pokemons'])}/6)\n"
+    text = f"**{team['name']}** ({len(team['pokemons'])}/6)\n\n"
     text += "\n".join(
         f"**{p['name']}** - Lv. 100"
         for p in team["pokemons"]
@@ -112,8 +99,18 @@ async def myteam_handler(client, message: Message):
         text,
         reply_markup=create_view_buttons(user["active_team"])
     )
+
 @shivuu.on_callback_query()
 async def callback_handler(client, callback: CallbackQuery):
+    # Verify user permission
+    if not (callback.message.reply_to_message and callback.message.reply_to_message.from_user):
+        await callback.answer("This menu is invalid.", show_alert=True)
+        return
+    original_user_id = callback.message.reply_to_message.from_user.id
+    if callback.from_user.id != original_user_id:
+        await callback.answer("Only the command user can interact!", show_alert=True)
+        return
+
     data = callback.data
     user_id = callback.from_user.id
     user = await get_user(user_id)
@@ -161,7 +158,7 @@ async def callback_handler(client, callback: CallbackQuery):
                 p["name"], callback_data=f"remove:{i}"
             )] for i, p in enumerate(team["pokemons"])
         ]
-        buttons.append([InlineKeyboardButton("🔙 Back", callback_data="exit_remove")])
+        buttons.append([InlineKeyboardButton("Back", callback_data="exit_remove")])
         await callback.message.edit_reply_markup(InlineKeyboardMarkup(buttons))
     
     elif data.startswith("remove:"):
@@ -193,7 +190,7 @@ async def update_team_display(callback: CallbackQuery, team_index: int, edit_mod
     user = await get_user(callback.from_user.id)
     team = user["teams"][team_index]
     
-    text = f"**Team {team['name']}** ({len(team['pokemons'])}/6)\n"
+    text = f"**{team['name']}** ({len(team['pokemons'])}/6)\n\n"
     text += "\n".join(
         f"**{p['name']}** - Lv. 100"
         for p in team["pokemons"]
