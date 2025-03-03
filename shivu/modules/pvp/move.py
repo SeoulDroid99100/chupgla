@@ -1,8 +1,8 @@
 import json
 import random
 from math import ceil
-from base import Item, coef_type
-from status import *
+from .base import Item, coef_type
+from .status import *
 
 # The critical hit ratio for all attacking moves (without a high critical hit ratio)
 NORMAL_CRITICAL = 0.04167
