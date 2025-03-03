@@ -7,7 +7,7 @@ from typing import Dict, List
 
 # Load Pokémon data
 ka = os.path.join(os.path.dirname(__file__), 'pokemons.json')
-with open("pokemons.json") as f:
+with open("ka") as f:
     POKEMONS: Dict[str, dict] = json.load(f)
     
 POKE_NAMES = list(POKEMONS.keys())
