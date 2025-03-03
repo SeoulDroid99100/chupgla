@@ -6,6 +6,7 @@ import json
 from typing import Dict, List
 
 # Load Pokémon data
+ka = os.path.join(os.path.dirname(__file__), 'pokemons.json')
 with open("pokemons.json") as f:
     POKEMONS: Dict[str, dict] = json.load(f)
     
