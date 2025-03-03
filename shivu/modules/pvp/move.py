@@ -1,16 +1,13 @@
 # shivu/modules/pvp/move.py
-
 import json
 import random
 from math import ceil
-from .base import Item, coef_type # Relative Import
+from pyrogram.types import InlineKeyboardButton
+from .base import Item, coef_type
 
-# The rest of this file is largely the same as your corrected version,
-# with minor adjustments to remove unnecessary parameters and use
-# instance attributes.
-
-# Constants
 NORMAL_CRITICAL = 0.04167
+COEF_STAGE = [2/8, 2/7, 2/6, 2/5, 2/4, 2/3, 2/2, 
+              3/2, 4/2, 5/2, 6/2, 7/2, 8/2]
 
 class Move(Item):
     seperator = ' | '
@@ -18,397 +15,341 @@ class Move(Item):
     def __init__(self, name, user, opp=None, description=None, **kwargs):
         super().__init__(name=name, **kwargs)
         self.user = user
-        if opp is None:
-            opp = user.opp
+        self.opp = opp or user.opp
         self.description = description
-        self.opp = opp
         self.critical = NORMAL_CRITICAL
-        self.effect = globals().get('_' + self.name.lower(), _normal_attack)
+        self.effect = globals().get(f'_{self.name.lower()}', _normal_attack)
+        self.messages = []
 
-    def __repr__(self):
-        return super().__repr__() + '\n' + self.description
-
-    def __call__(self):
+    async def execute(self):
+        self.messages = []
         if self.user.active:
-            self.effect(self)
-
-    # Physical moves use the Attack stat of the user and Defense stat of the target for damage calculation.
-    # Special moves use the Sp_Atk stat of the user and Sp_Def stat of the target for damage calculation.
-    # user refers to the Pokemon using the move/attack
-    # opp refers to the Pokemon that will be taking/receiving damage from the move/attack
-    def attack(self):
-        user, opp = self.user, self.opp
-        if self.category == 'Physical':
-            A = user.attack
-            D = opp.defense
-
-        elif self.category == 'Special':
-            A = user.sp_atk
-            D = opp.sp_def
+            await self.effect(self)
         
-        # Finds the resultant type effectiveness if the target is a dual-type Pokemon. If its a single type Pokemon it will work as well
-        coef_type_dual = 1
-        for type_name in opp.type:
-            coef_type_dual *= coef_type[self.type][type_name]
+        buttons = [[
+            InlineKeyboardButton(move, callback_data=f"move_{move}") 
+            for move in self.user.moves[:4]
+        ]]
+        return (
+            getattr(self, 'damage', 0),
+            '\n'.join(self.messages),
+            InlineKeyboardMarkup(buttons) if buttons else None
+        )
 
-        # A super-effective move based on the move's type and the target's type
-        if coef_type_dual > 1:
-            print('The move is super effective!')
-            print()
-
-        # A not very effective move based on the move's type and the target's type
-        elif coef_type_dual < 1 and coef_type_dual > 0:
-            print('The move is not very effective...')
-            print()
-
-        # If the target Pokemon is immune to a move of a particular type, due to the target Pokemon's type
-        elif coef_type_dual == 0:
-            print(f"It didn't even affect {opp.player[1]}'s {opp.name} at all...")
-
-        # For damage calculation
-        modifier = random.uniform(0.85, 1)*coef_type_dual
-        # If it is a critical hit
-        critical_check = False
-        if random.random() < self.critical:
-            critical_check = True
-            modifier *= 1.5
-
-        # If the type of the move is the same as that of the user, so as to receive Same Type Attack Bonus (STAB)
-        if self.type in user.type:
-            modifier *= 1.5
-
-        # If the user is burned, its Physical attacking moves will only have half as much power
-        if 'burn' in self.user.status and self.category == 'Physical':
-            modifier *= 0.5
-
-        # Damage calculation
-        damage = ceil(((2*user.level/5 + 2)*self.power*A/D/50 + 2)*modifier)
-        if random.random() > self.accuracy:
-            print('The attack missed!')
-            print()
-            damage = 0
-
+    async def attack(self):
+        user, opp = self.user, self.opp
+        
+        if self.category == 'Physical':
+            A = user.attack * COEF_STAGE[user.stages.attack + 6]
+            D = opp.defense * COEF_STAGE[opp.stages.defense + 6]
         else:
-            opp.hp -= damage
+            A = user.sp_atk * COEF_STAGE[user.stages.sp_atk + 6]
+            D = opp.sp_def * COEF_STAGE[opp.stages.sp_def + 6]
 
-        if damage > 0 and critical_check == True:
-            print ("It's a critical hit!")
-            print()
+        type_mult = 1
+        for t in opp.type:
+            type_mult *= coef_type[self.type].get(t, 1)
+        
+        effectiveness_msg = {
+            0: f"It didn't affect {opp.trainer}'s {opp.name}!",
+            0.25: "Not very effective...",
+            0.5: "Not very effective...",
+            2: "Super effective!",
+            4: "Super effective!"
+        }.get(type_mult, "")
+        if effectiveness_msg:
+            self.messages.append(effectiveness_msg)
 
-        print(f"{self.opp.player[1]}'s {self.opp.name} lost {damage} HP due to {self.user.player[1]}'s {self.user.name}'s {self.name}!")
-        print()
+        crit = 1.5 if random.random() < self.critical else 1
+        if crit > 1:
+            self.messages.append("Critical hit!")
+
+        stab = 1.5 if self.type in user.type else 1
+        status_mod = 1
+        if 'burn' in user.status and self.category == 'Physical':
+            status_mod *= 0.5
+            self.messages.append(f"{user.name}'s attack weakened by burn!")
+
+        modifier = random.uniform(0.85, 1) * type_mult * stab * crit * status_mod
+        base_damage = ((2 * 100 / 5 + 2) * self.power * A / D) / 50 + 2
+        damage = ceil(base_damage * modifier)
+
+        if random.random() > self.accuracy:
+            self.messages.append(f"{self.name} missed!")
+            return 0
+
+        opp.hp = max(0, opp.hp - damage)
+        self.damage = damage
+        self.messages.append(
+            f"{self.user.trainer}'s {self.user.name} used {self.name}! "
+            f"{self.opp.trainer}'s {self.opp.name} lost {damage} HP!"
+        )
         return damage
 
-# For moves that only deal damage without any effects/secondary effects
-# user refers to the Pokemon that is using the move/attack
-# opp refers to the Pokemon that will be taking/receiving damage from the move/attack
-def _normal_attack(move):
-	damage = move.attack()
-	user = move.user
-	opp = move.opp
+# All move implementations
+async def _normal_attack(move):
+    return await move.attack()
 
-def _curse(move):
-	user = move.user
-	user.stages.attack += 1
-	user.stages.defense += 1
-	user.stages.speed -= 1
-	print(f"{user.player[1]}'s {user.name}'s Attack and Defense rose!")
-	print(f"{user.player[1]}'s {user.name}'s Speed fell!")
-	
-def _body_slam(move):
-	opp = move.opp
-	damage = move.attack() # Deals the damage, causes the target's HP to decrease
-	
-	if damage > 0: # Secondary effects only come in to play if the attack lands and deals damage on the opposing Pokemon
-		if random.random() < 0.3:
-			opp.add_status('paralyse')
- 
-def _rest(move):
-	user = move.user
-	user.hp = user.max_hp
-	user.add_status('sleep', t_sleep = 3)
-	print(f"{user.player[1]}'s {user.name} went to sleep and became healthy!")
- 
-def _swords_dance(move):
-	user = move.user
-	user.stages.attack += 2
-	print(f"{user.player[1]}'s {user.name}'s Attack rose sharply!")
- 
-def _meteor_mash(move):
-	user = move.user
-	damage = move.attack()
-	
-	if damage > 0:
-		if random.random() < 0.2:
-			user.stages.attack +=1
-			print(f"{user.player[1]}'s {user.name}'s Attack rose!")
- 
-def _close_combat(move):
-	user = move.user
-	damage = move.attack()
+async def _curse(move):
+    damage = await move.attack()
+    if damage > 0:
+        move.user.stages.attack += 1
+        move.user.stages.defense += 1
+        move.user.stages.speed -= 1
+        move.messages.extend([
+            f"{move.user.name}: Attack/Defense rose!",
+            f"{move.user.name}: Speed fell!"
+        ])
+    return damage
 
-	if damage > 0:
-		user.stages.attack -= 1
-		user.stages.sp_def -= 1
-		print(f"{user.player[1]}'s {user.name}'s Defense and Sp_Def fell!")
- 
-def _dragon_dance(move):
-	user = move.user
-	user.stages.attack += 1
-	user.stages.speed += 1
-	print(f"{user.player[1]}'s {user.name}'s Attack and Speed rose!")
- 
-def _double_edge(move):
-	opp = move.opp
-	user = move.user
-	damage = move.attack()
+async def _body_slam(move):
+    damage = await move.attack()
+    if damage > 0 and random.random() < 0.3:
+        await move.opp.add_status('paralyze')
+        move.messages.append(f"{move.opp.name} paralyzed!")
+    return damage
 
-	if damage > 0:
-		user.hp -= int(0.33 * damage)
-		print(f"{user.player[1]}'s {user.name} received {int(0.33 * damage)} HP recoil damage!")
-		print()
- 
-def _scald(move):
-	opp = move.opp
-	damage = move.attack()
-	
-	if damage > 0:
-		if random.random() < 0.3:
-			opp.add_status('burn')
+async def _rest(move):
+    move.user.hp = move.user.max_hp
+    await move.user.add_status('sleep', turns=3)
+    move.messages.append(f"{move.user.name} slept and recovered HP!")
 
-def _sludge_bomb(move):
-	opp = move.opp
-	damage = move.attack()
-	
-	if damage > 0:
-		if random.random() < 0.3:
-			opp.add_status('poison')
+async def _swords_dance(move):
+    move.user.stages.attack += 2
+    move.messages.append(f"{move.user.name}: Attack sharply rose!")
 
-def _stone_edge(move):
-	opp = move.opp
-	move.critical = 0.125 # Stone_Edge is a move with a higher critical hit ratio
-	damage = move.attack()
- 
-def _ice_punch(move):
-	opp = move.opp
-	damage = move.attack()
-	
-	if damage > 0:
-		if random.random() < 0.1:
-			opp.add_status('freeze')
+async def _meteor_mash(move):
+    damage = await move.attack()
+    if damage > 0 and random.random() < 0.2:
+        move.user.stages.attack += 1
+        move.messages.append(f"{move.user.name}: Attack rose!")
+    return damage
 
-def _rock_slide(move):
-	opp = move.opp
-	damage = move.attack()
-	
-	if damage > 0:
-		if random.random() < 0.3:
-			opp.add_status('flinch')
-			print(f"{opp.player[1]}'s {opp.name} flinched!")
- 
-def _crunch(move):
-	opp = move.opp
-	damage = move.attack()
+async def _close_combat(move):
+    damage = await move.attack()
+    if damage > 0:
+        move.user.stages.defense -= 1
+        move.user.stages.sp_def -= 1
+        move.messages.append(f"{move.user.name}: Defense/Sp.Def fell!")
+    return damage
 
-	if damage > 0:
-		if random.random() < 0.2:
-			opp.stages.defense -= 1
-			print(f"{opp.player[1]}'s {opp.name}'s Defense fell!")
+async def _dragon_dance(move):
+    damage = await move.attack()
+    if damage > 0:
+        move.user.stages.attack += 1
+        move.user.stages.speed += 1
+        move.messages.append(f"{move.user.name}: Attack/Speed rose!")
+    return damage
 
-def _fire_punch(move):
-	opp = move.opp
-	damage = move.attack()
-	
-	if damage > 0:
-		if random.random() < 0.1:
-			opp.add_status('burn')
+async def _double_edge(move):
+    damage = await move.attack()
+    if damage > 0:
+        recoil = int(0.33 * damage)
+        move.user.hp = max(0, move.user.hp - recoil)
+        move.messages.append(f"{move.user.name} took {recoil} recoil damage!")
+    return damage
 
-def _quiver_dance(move):
-	user = move.user
-	user.stages.sp_atk += 1
-	user.stages.sp_def += 1
-	user.stages.speed += 1
-	print(f"{user.player[1]}'s {user.name}'s Sp_Atk, Sp_Def and Speed rose!")
- 
-def _flamethrower(move):
-	opp = move.opp
-	damage = move.attack()
-	
-	if damage > 0:
-		if random.random() < 0.1:
-			opp.add_status('burn')
+async def _scald(move):
+    damage = await move.attack()
+    if damage > 0 and random.random() < 0.3:
+        await move.opp.add_status('burn')
+        move.messages.append(f"{move.opp.name} was burned!")
+    return damage
 
-def _bug_buzz(move):
-	opp = move.opp
-	damage = move.attack()
-	
-	if damage > 0:
-		if random.random() < 0.1:
-			opp.stages.sp_def -= 1
-			print(f"{opp.player[1]}'s {opp.name}'s Sp_Def fell!")
+async def _sludge_bomb(move):
+    damage = await move.attack()
+    if damage > 0 and random.random() < 0.3:
+        await move.opp.add_status('poison')
+        move.messages.append(f"{move.opp.name} poisoned!")
+    return damage
 
-def _roost(move):
-	user = move.user
-	user.hp += user.max_hp / 2
-	print(f"{user.player[1]}'s {user.name} has recovered some HP!")
-	
-def _shadow_ball(move):
-	opp = move.opp
-	damage = move.attack()
-	
-	if damage > 0:
-		if random.random() < 0.2:
-			opp.stages.sp_def -= 1  
-			print(f"{opp.player[1]}'s {opp.name}'s Sp_Def fell!")
- 
-def _sludge_wave(move):
-	opp = move.opp
-	damage = move.attack()
-	
-	if damage > 0:
-		if random.random() < 0.1:
-			opp.add_status('poison')
- 
-def _focus_blast(move):
-	opp = move.opp
-	damage = move.attack()
+async def _stone_edge(move):
+    move.critical = 0.125
+    damage = await move.attack()
+    move.critical = NORMAL_CRITICAL  # Reset
+    return damage
 
-	if damage > 0:
-		if random.random() < 0.1:
-			opp.stages.sp_def -= 1  
-			print(f"{opp.player[1]}'s {opp.name}'s Sp_Def fell!")
- 
-def _thunderbolt(move):
-	opp = move.opp
-	damage = move.attack()
-	
-	if damage > 0:
-		if random.random() < 0.1:
-			opp.add_status('paralyse')
- 
-def _fire_blast(move):
-	opp = move.opp
-	damage = move.attack()
-	
-	if damage > 0:
-		if random.random() < 0.1:
-			opp.add_status('burn')
- 
-def _air_slash(move):
-	opp = move.opp
-	damage = move.attack()
-	
-	if damage > 0:
-		if random.random() < 0.3:
-			opp.add_status('flinch')
-			print(f"{opp.player[1]}'s {opp.name} flinched!")
- 
-def _ice_beam(move):
-	opp = move.opp
-	damage = move.attack()
+async def _ice_punch(move):
+    damage = await move.attack()
+    if damage > 0 and random.random() < 0.1:
+        await move.opp.add_status('freeze')
+        move.messages.append(f"{move.opp.name} frozen!")
+    return damage
 
-	if damage > 0:
-		if random.random() < 0.1:
-			opp.add_status('freeze')
- 
-def _leech_seed(move):
-	opp = move.opp
-	opp.add_status('leech_seed')
+async def _rock_slide(move):
+    damage = await move.attack()
+    if damage > 0 and random.random() < 0.3:
+        await move.opp.add_status('flinch')
+        move.messages.append(f"{move.opp.name} flinched!")
+    return damage
 
-	if 'Grass' in opp.type:
-		print(f"It didn't even affect {opp.player[1]}'s {opp.name} at all...")
-		print()		
- 
-def _leaf_storm(move):
-	user = move.user
-	damage = move.attack()
-	
-	if damage > 0:
-		user.stages.sp_atk -=2
-		print(f"{user.player[1]}'s {user.name}'s Sp_Atk fell sharply!")
- 
-def _psychic(move):
-	opp = move.opp
-	damage = move.attack()
-	
-	if damage > 0:
-		if random.random() < 0.1:
-			opp.stages.sp_def -= 1  
-			print(f"{opp.player[1]}'s {opp.name}'s Sp_Def fell!")
- 
-def _moonblast(move):
-	opp = move.opp
-	damage = move.attack()
-	
-	if damage > 0:
-		if random.random() < 0.3:
-			opp.stages.sp_atk -= 1  
-			print(f"{opp.player[1]}'s {opp.name}'s Sp_Atk fell!")
+async def _crunch(move):
+    damage = await move.attack()
+    if damage > 0 and random.random() < 0.2:
+        move.opp.stages.defense -= 1
+        move.messages.append(f"{move.opp.name}: Defense fell!")
+    return damage
 
-def _icicle_crash(move):
-	opp = move.opp
-	damage = move.attack()
-	
-	if damage > 0:
-		if random.random() < 0.3:
-			opp.add_status('flinch')
-			print(f"{opp.player[1]}'s {opp.name} flinched!")
+async def _fire_punch(move):
+    damage = await move.attack()
+    if damage > 0 and random.random() < 0.1:
+        await move.opp.add_status('burn')
+        move.messages.append(f"{move.opp.name} burned!")
+    return damage
 
-def _will_o_wisp(move):
-	opp = move.opp
-	opp.add_status('burn')
+async def _quiver_dance(move):
+    move.user.stages.sp_atk += 1
+    move.user.stages.sp_def += 1
+    move.user.stages.speed += 1
+    move.messages.append(f"{move.user.name}: Sp.Atk/Sp.Def/Speed rose!")
 
-	if 'Fire' in opp.type:
-		print(f"It didn't even affect {opp.player[1]}'s {opp.name} at all...")
-		print()
+async def _flamethrower(move):
+    damage = await move.attack()
+    if damage > 0 and random.random() < 0.1:
+        await move.opp.add_status('burn')
+        move.messages.append(f"{move.opp.name} burned!")
+    return damage
 
-def _draco_meteor(move):
-	user = move.user
-	damage = move.attack()
-	
-	if damage > 0:
-		user.stages.sp_atk -=2
-		print(f"{user.player[1]}'s {user.name}'s Sp_Atk fell sharply!")
- 
-def _dark_pulse(move):
-	user = move.user
-	opp = user.opp
-	damage = move.attack()
-	
-	if damage > 0:
-		if random.random() < 0.2:
-			opp.add_status('flinch')
-			print(f"{opp.player[1]}'s {opp.name} flinched!")
- 
-def _charge_beam(move):
-	user = move.user
-	damage = move.attack()
-	
-	if damage > 0:
-		if random.random() < 0.7:
-			user.stages.sp_atk +=1
-			print(f"{user.player[1]}'s {user.name}'s Sp_Atk rose!")
- 
-def _thunder_punch(move):
-	opp = move.opp
-	damage = move.attack()
-	
-	if damage > 0:
-		if random.random() < 0.1:
-			opp.add_status('paralyse')
- 
-def _mystical_fire(move):
-	opp = move.opp
-	damage = move.attack()
+async def _bug_buzz(move):
+    damage = await move.attack()
+    if damage > 0 and random.random() < 0.1:
+        move.opp.stages.sp_def -= 1
+        move.messages.append(f"{move.opp.name}: Sp.Def fell!")
+    return damage
 
-	if damage > 0:
-		opp.stages.sp_atk -= 1
-		print(f"{opp.player[1]}'s {opp.name}'s Sp_Atk fell!")
+async def _roost(move):
+    move.user.hp += move.user.max_hp // 2
+    move.messages.append(f"{move.user.name} recovered HP!")
 
-def _toxic(move):
-	opp = move.opp
-	opp.add_status('bad_poison')
+async def _shadow_ball(move):
+    damage = await move.attack()
+    if damage > 0 and random.random() < 0.2:
+        move.opp.stages.sp_def -= 1
+        move.messages.append(f"{move.opp.name}: Sp.Def fell!")
+    return damage
 
-	if 'Poison' in opp.type or 'Steel' in opp.type:
-		print(f"It didn't even affect {opp.player[1]}'s {opp.name} at all...")
-		print()
+async def _sludge_wave(move):
+    damage = await move.attack()
+    if damage > 0 and random.random() < 0.1:
+        await move.opp.add_status('poison')
+        move.messages.append(f"{move.opp.name} poisoned!")
+    return damage
+
+async def _focus_blast(move):
+    damage = await move.attack()
+    if damage > 0 and random.random() < 0.1:
+        move.opp.stages.sp_def -= 1
+        move.messages.append(f"{move.opp.name}: Sp.Def fell!")
+    return damage
+
+async def _thunderbolt(move):
+    damage = await move.attack()
+    if damage > 0 and random.random() < 0.1:
+        await move.opp.add_status('paralyze')
+        move.messages.append(f"{move.opp.name} paralyzed!")
+    return damage
+
+async def _fire_blast(move):
+    damage = await move.attack()
+    if damage > 0 and random.random() < 0.1:
+        await move.opp.add_status('burn')
+        move.messages.append(f"{move.opp.name} burned!")
+    return damage
+
+async def _air_slash(move):
+    damage = await move.attack()
+    if damage > 0 and random.random() < 0.3:
+        await move.opp.add_status('flinch')
+        move.messages.append(f"{move.opp.name} flinched!")
+    return damage
+
+async def _ice_beam(move):
+    damage = await move.attack()
+    if damage > 0 and random.random() < 0.1:
+        await move.opp.add_status('freeze')
+        move.messages.append(f"{move.opp.name} frozen!")
+    return damage
+
+async def _leech_seed(move):
+    if 'Grass' not in move.opp.type:
+        await move.opp.add_status('leech_seed')
+        move.messages.append(f"{move.opp.name} seeded!")
+    else:
+        move.messages.append(f"{move.opp.name} immune to Leech Seed!")
+
+async def _leaf_storm(move):
+    damage = await move.attack()
+    if damage > 0:
+        move.user.stages.sp_atk -= 2
+        move.messages.append(f"{move.user.name}: Sp.Atk sharply fell!")
+    return damage
+
+async def _psychic(move):
+    damage = await move.attack()
+    if damage > 0 and random.random() < 0.1:
+        move.opp.stages.sp_def -= 1
+        move.messages.append(f"{move.opp.name}: Sp.Def fell!")
+    return damage
+
+async def _moonblast(move):
+    damage = await move.attack()
+    if damage > 0 and random.random() < 0.3:
+        move.opp.stages.sp_atk -= 1
+        move.messages.append(f"{move.opp.name}: Sp.Atk fell!")
+    return damage
+
+async def _icicle_crash(move):
+    damage = await move.attack()
+    if damage > 0 and random.random() < 0.3:
+        await move.opp.add_status('flinch')
+        move.messages.append(f"{move.opp.name} flinched!")
+    return damage
+
+async def _will_o_wisp(move):
+    if 'Fire' not in move.opp.type:
+        await move.opp.add_status('burn')
+        move.messages.append(f"{move.opp.name} burned!")
+    else:
+        move.messages.append(f"{move.opp.name} immune to burn!")
+
+async def _draco_meteor(move):
+    damage = await move.attack()
+    if damage > 0:
+        move.user.stages.sp_atk -= 2
+        move.messages.append(f"{move.user.name}: Sp.Atk sharply fell!")
+    return damage
+
+async def _dark_pulse(move):
+    damage = await move.attack()
+    if damage > 0 and random.random() < 0.2:
+        await move.opp.add_status('flinch')
+        move.messages.append(f"{move.opp.name} flinched!")
+    return damage
+
+async def _charge_beam(move):
+    damage = await move.attack()
+    if damage > 0 and random.random() < 0.7:
+        move.user.stages.sp_atk += 1
+        move.messages.append(f"{move.user.name}: Sp.Atk rose!")
+    return damage
+
+async def _thunder_punch(move):
+    damage = await move.attack()
+    if damage > 0 and random.random() < 0.1:
+        await move.opp.add_status('paralyze')
+        move.messages.append(f"{move.opp.name} paralyzed!")
+    return damage
+
+async def _mystical_fire(move):
+    damage = await move.attack()
+    if damage > 0:
+        move.opp.stages.sp_atk -= 1
+        move.messages.append(f"{move.opp.name}: Sp.Atk fell!")
+    return damage
+
+async def _toxic(move):
+    if 'Poison' not in move.opp.type and 'Steel' not in move.opp.type:
+        await move.opp.add_status('bad_poison')
+        move.messages.append(f"{move.opp.name} badly poisoned!")
+    else:
+        move.messages.append(f"{move.opp.name} immune to poison!")
