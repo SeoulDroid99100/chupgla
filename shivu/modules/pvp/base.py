@@ -1,7 +1,7 @@
 import json
 import os
 
-COEF_TYPE_DB_PATH = os.path.join(os.path.dirname(__file__), 'data', '.coef_type.json')
+COEF_TYPE_DB_PATH = os.path.join(os.path.dirname(__file__), 'pvp', '.coef_type.json')
 
 STAT_NAMES = ['attack', 'defense', 'sp_atk', 'sp_def', 'speed', 'hp']
 # A list storing the multipliers to multiply the stat by, if they are in a particular stage (-6 at index 0 to 6 at index 12)
