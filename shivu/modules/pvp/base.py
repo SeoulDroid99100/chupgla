@@ -1,6 +1,6 @@
 import json
 
-COEF_TYPE_DB_PATH = 'shovu.modules.pvp.coef_type.json'
+COEF_TYPE_DB_PATH = 'shivu.modules.pvp.coef_type.json'
 STAT_NAMES = ['attack', 'defense', 'sp_atk', 'sp_def', 'speed', 'hp']
 # A list storing the multipliers to multiply the stat by, if they are in a particular stage (-6 at index 0 to 6 at index 12)
 coef_stage = [2/8, 2/7, 2/6, 2/5, 2/4, 2/3, 2/2, 3/2, 4/2, 5/2, 6/2, 7/2, 8/2]
