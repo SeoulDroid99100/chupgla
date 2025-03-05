@@ -1,4 +1,5 @@
 import asyncio
+import os
 from typing import Dict, List
 from core.entities.pokemon import AsyncPokemon
 from core.mechanics import (
@@ -9,6 +10,11 @@ from core.mechanics import (
     TerastalSystem,
     ZMoveSystem
 )
+
+# Join paths to ensure cross-platform compatibility
+CORE_DIR = os.path.join("core")
+ENTITIES_DIR = os.path.join(CORE_DIR, "entities")
+MECHANICS_DIR = os.path.join(CORE_DIR, "mechanics")
 
 class AsyncBattleEngine:
     def __init__(self, player1: AsyncPokemon, player2: AsyncPokemon):
