@@ -1,6 +1,7 @@
 # pvp.py - Main Entry Point
 from shivu import shivuu
-from pyrogram import filters, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram import filters
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from .core.battle.engine import AsyncBattleEngine
 from .core.data.species import RAYQUAZA_SPECIES
 from .core.data.moves import MOVES
