@@ -1,2 +1,2 @@
 from . import *
-from .pvp import *
+from . import pvp
