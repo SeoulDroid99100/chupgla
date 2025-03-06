@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 # ⚙️ ᴄᴏɴғɪɢ
 C_ᴅᴜʀᴀᴛɪᴏɴ = 15
-B_ʀᴇᴡᴀʀᴅ = 100
+B_ʀᴇᴡᴀʀᴅ = 100000
 L_ᴛʜʀᴇsʜᴏʟᴅs = [1000, 5000, 15000, 30000, 50000]
 P_ᴄᴏsᴛs = {"ʜɪɴᴛ": 200, "ᴛɪᴍᴇ": 300, "ᴍᴜʟᴛ": 500}
 
@@ -47,7 +47,7 @@ async def handle_powerups(_, query):
     choice = query.data
     cost = P_ᴄᴏsᴛs.get(choice, 0)
     
-    if u_data["economy"]["wallet"] < cost:
+    if not u_data or u_data["economy"]["wallet"] < cost:
         await query.answer("⌞ ɪɴsᴜғғɪᴄɪᴇɴᴛ ғᴜɴᴅs")
         return
 
@@ -67,6 +67,9 @@ async def init_captcha(_, m):
     async with captcha_lock:
         if c_id in active_captchas:
             return await m.reply("⚠ ᴀᴄᴛɪᴠᴇ ᴄᴀᴘᴛᴄʜᴀ ᴇxɪsᴛs\n⎯⎯⎯⎯⎯⎯⎯⎯⎯\nᴛʀʏ ᴀɢᴀɪɴ ɪɴ 15s")
+    
+    if not m.from_user:
+        return
     
     u_level = await get_user_level(m.from_user.id)
     code = generate_captcha_code(u_level)
@@ -96,8 +99,11 @@ async def init_captcha(_, m):
             await sent.edit_caption("⌞ ᴄᴀᴘᴛᴄʜᴀ ᴇxᴘɪʀᴇᴅ\n⎯⎯⎯⎯⎯⎯⎯⎯⎯")
             del active_captchas[c_id]
 
-@shivuu.on_message(filters.text & filters.group)
+@shivuu.on_message(filters.text & filters.group & ~filters.command)  # Fixed filter
 async def verify_solve(_, m):
+    if not m.from_user:
+        return
+    
     c_id = m.chat.id
     u_id = m.from_user.id
     guess = m.text.strip()
