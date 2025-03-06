@@ -1,319 +1,475 @@
-from shivu import shivuu, xy
-from pyrogram import filters
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram import Client, filters
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 import random
+import time
+from shivu import shivuu
+from datetime import datetime
 import asyncio
-from datetime import datetime, timedelta
+import re
 
-# --- Constants ---
-PVP_COOLDOWN = 10  # Seconds
-AI_MAX_BET = 10   # Maximum bet for AI
-WIN_POINTS = 10    # Points for winning
-LOSS_POINTS = -5  # Points for losing
-DEFEATED_PLAYER_WIN_POINTS = 50 # Points for defeating player
-DEFEATED_PLAYER_LOSS_POINTS = -25 # Points for losing to player
+# Dictionary to store active challenges
+active_challenges = {}
 
-# --- Helper Functions ---
-def small_caps_bold(text):
-    """Converts text to small caps (Unicode) and bolds it."""
-    small_caps_map = {
-        'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ғ', 'G': 'ɢ',
-        'H': 'ʜ', 'I': 'ɪ', 'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ',
-        'O': 'ᴏ', 'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ', 'S': 's', 'T': 'ᴛ', 'U': 'ᴜ',
-        'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x', 'Y': 'ʏ', 'Z': 'ᴢ',
-        '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄', '5': '₅', '6': '₆',
-        '7': '₇', '8': '₈', '9': '₉',
+# Define constants
+IMAGINARY_OPPONENT_NAME = "LundBot"
+MAX_IMAGINARY_BET = 10
+LUND_BASE_GROWTH = 0.05  # Base growth factor for lund size
+
+async def get_user_data(user_id):
+    """Fetch user data from database"""
+    user_data = await xy.find_one({"user_id": user_id})
+    return user_data
+
+async def update_user_data(user_id, update_query):
+    """Update user data in database"""
+    await xy.update_one({"user_id": user_id}, update_query)
+
+async def get_user_rank(user_id):
+    """Get user ranking based on combat rating"""
+    pipeline = [
+        {"$sort": {"combat_stats.rating": -1}},
+        {"$group": {"_id": "$user_id", "rank": {"$rank": {}}}}
+    ]
+    ranks = await xy.aggregate(pipeline).to_list(None)
+    for rank_data in ranks:
+        if rank_data["_id"] == user_id:
+            return rank_data["rank"]
+    return "N/A"
+
+async def get_top_players(limit=2):
+    """Get top players by combat rating"""
+    top_players = await xy.find({}).sort("combat_stats.rating", -1).limit(limit).to_list(None)
+    return top_players
+
+async def calculate_win_rate(user_id):
+    """Calculate win rate for a user"""
+    user_data = await get_user_data(user_id)
+    if not user_data:
+        return 0
+    
+    wins = user_data.get("combat_stats", {}).get("pvp", {}).get("wins", 0)
+    losses = user_data.get("combat_stats", {}).get("pvp", {}).get("losses", 0)
+    
+    total_battles = wins + losses
+    if total_battles == 0:
+        return 0
+    
+    return round((wins / total_battles) * 100)
+
+async def get_win_streak(user_id):
+    """Get current and max win streak for a user"""
+    user_data = await get_user_data(user_id)
+    if not user_data:
+        return 0, 0
+    
+    current_streak = user_data.get("combat_stats", {}).get("current_streak", 0)
+    max_streak = user_data.get("combat_stats", {}).get("max_streak", 0)
+    
+    return current_streak, max_streak
+
+async def update_win_streak(user_id, is_win):
+    """Update win streak for a user"""
+    user_data = await get_user_data(user_id)
+    if not user_data:
+        return
+    
+    current_streak = user_data.get("combat_stats", {}).get("current_streak", 0)
+    max_streak = user_data.get("combat_stats", {}).get("max_streak", 0)
+    
+    if is_win:
+        current_streak += 1
+        if current_streak > max_streak:
+            max_streak = current_streak
+    else:
+        current_streak = 0
+    
+    update_query = {
+        "$set": {
+            "combat_stats.current_streak": current_streak,
+            "combat_stats.max_streak": max_streak
+        }
     }
-    bold_text = ''.join(small_caps_map.get(char.upper(), char) for char in text)
-    return f"**{bold_text}**"
+    
+    await update_user_data(user_id, update_query)
 
-def small_caps(text):
-    """Converts text to small caps (Unicode)."""
-    small_caps_map = {
-        'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ғ', 'G': 'ɢ',
-        'H': 'ʜ', 'I': 'ɪ', 'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ',
-        'O': 'ᴏ', 'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ', 'S': 's', 'T': 'ᴛ', 'U': 'ᴜ',
-        'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x', 'Y': 'ʏ', 'Z': 'ᴢ',
-        '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄', '5': '₅', '6': '₆',
-        '7': '₇', '8': '₈', '9': '₉',
-    }
-    return ''.join(small_caps_map.get(char.upper(), char) for char in text)
-
-
-async def get_ranking(user_id: int, current_size: float) -> tuple[int, int]:
-    """Gets the user's global ranking."""
-    try:
-        larger_users_count = await xy.count_documents({"progression.lund_size": {"$gt": current_size}})
-        return larger_users_count + 1, await xy.count_documents({})
-    except Exception as e:
-        print(f"Error in get_ranking: {e}")
-        raise
-
-async def calculate_percentage_smaller(user_id: int, current_size: float) -> float:
-    """Calculates the percentage of users with a smaller lund_size."""
-    try:
-        total_users = await xy.count_documents({"progression.lund_size": {"$exists": True}})
-        if total_users <= 1: return 100.0
-        smaller_count = await xy.count_documents({"progression.lund_size": {"$lt": current_size}})
-        return round((smaller_count / (total_users - 1)) * 100, 2)
-    except Exception:
-        print("Error calculating percentage")
-        raise
-
-# --- Pending PvP Requests --- Removed pending requests
-# pending_pvp_requests = {}  # { (challenger_id, challenged_id): {"bet": bet_amount, "message_id": msg_id} }
-
-
-# --- PvP Command Handler ---
-@shivuu.on_message(filters.command("pvp") & (filters.group | filters.private))
-async def pvp_challenge(client: shivuu, message: Message):
+@shivuu.on_message(filters.command("pvp") & filters.group)
+async def pvp_command(client, message):
     challenger_id = message.from_user.id
-    challenger_data = await xy.find_one({"user_id": challenger_id})
-
+    challenger_name = message.from_user.first_name
+    
+    # Check if bet amount is provided
+    if len(message.command) < 2:
+        await message.reply("⌧ ᴄᴀʟʟ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ ᴡɪᴛʜ ᴀ ʙᴇᴛ ᴀᴍᴏᴜɴᴛ.")
+        return
+    
+    try:
+        bet_amount = float(message.command[1])
+    except ValueError:
+        await message.reply("⌧ ɪɴᴠᴀʟɪᴅ ʙᴇᴛ ᴀᴍᴏᴜɴᴛ. ᴘʟᴇᴀsᴇ ᴇɴᴛᴇʀ ᴀ ᴠᴀʟɪᴅ ɴᴜᴍʙᴇʀ.")
+        return
+    
+    # Check if user has enough funds
+    challenger_data = await get_user_data(challenger_id)
     if not challenger_data:
-        await message.reply(small_caps_bold("⌧ ᴀᴄᴄᴏᴜɴᴛ ɴᴏᴛ ғᴏᴜɴᴅ! ᴜsᴇ /ʟsᴛᴀʀᴛ ᴛᴏ ʀᴇɢɪsᴛᴇʀ."))
+        await message.reply("⌧ ʏᴏᴜ ᴅᴏɴ'ᴛ ʜᴀᴠᴇ ᴀɴ ᴀᴄᴄᴏᴜɴᴛ. ᴜsᴇ /start ᴛᴏ ᴄʀᴇᴀᴛᴇ ᴏɴᴇ.")
         return
     
-    # --- Cooldown Check ---
-    last_pvp_time = challenger_data.get("combat_stats", {}).get("last_pvp_time")
-    if last_pvp_time:
-        time_since_last_pvp = (datetime.utcnow() - last_pvp_time).total_seconds()
-        if time_since_last_pvp < PVP_COOLDOWN:
-            remaining_cooldown = int(PVP_COOLDOWN - time_since_last_pvp)
-            await message.reply(small_caps_bold(f"⚔️ ᴄᴏᴏʟᴅᴏᴡɴ ᴀᴄᴛɪᴠᴇ! ᴛʀʏ ᴀɢᴀɪɴ ɪɴ {remaining_cooldown}s."))
-            return
-
-    # --- Check for reply and get challenged user/AI ---
-    if message.reply_to_message:
-        challenged_user = message.reply_to_message.from_user
-        challenged_id = challenged_user.id
-        challenged_data = await xy.find_one({"user_id": challenged_id})
-        is_ai = False
-
-        if not challenged_data:
-            await message.reply(small_caps_bold("⌧ ᴄʜᴀʟʟᴇɴɢᴇᴅ ᴜsᴇʀ ᴅᴏᴇsɴ'ᴛ ʜᴀᴠᴇ ᴀɴ ᴀᴄᴄᴏᴜɴᴛ."))
-            return
-          
-        if challenger_id == challenged_id:
-            await message.reply(small_caps_bold("ʏᴏᴜ ᴄᴀɴɴᴏᴛ ᴄʜᴀʟʟᴇɴɢᴇ ʏᴏᴜʀsᴇʟғ!"))
-            return
-
-    else: # Challenging AI
-        challenged_id = "AI"
-        challenged_data = None  # AI doesn't have data
-        is_ai = True
-        challenged_user = None # No user object for AI
-
-    # --- Get bet amount ---
-    if len(message.command) > 1:
-        try:
-            bet_amount = float(message.command[1])
-            if bet_amount <= 0:
-                raise ValueError
-        except ValueError:
-            await message.reply(small_caps_bold("⌧ ɪɴᴠᴀʟɪᴅ ʙᴇᴛ ᴀᴍᴏᴜɴᴛ. ᴜsᴇ `/pvp <cm>`."))
-            return
-    else:
-        await message.reply(small_caps_bold("⌧ ᴄᴀʟʟ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ ᴡɪᴛʜ ᴀ ɴᴜᴍʙᴇʀ ᴏғ ᴄᴇɴᴛɪᴍᴇᴛᴇʀs ʏᴏᴜ'ʀᴇ ᴡɪʟʟɪɴɢ ᴛᴏ ʙᴇᴛ."))
-        return
-
-    # --- AI Bet Limit ---
-    if is_ai and bet_amount > AI_MAX_BET:
-        await message.reply(small_caps_bold(f"⌧ ᴛʜᴇ ᴀɪ ᴄᴀɴ ᴏɴʟʏ ʙᴇᴛ ᴀ ᴍᴀxɪᴍᴜᴍ ᴏғ {AI_MAX_BET}ᴄᴍ."))
-        return
-
-    # --- Check User Bet Limit ---
-    if bet_amount > challenger_data["progression"]["lund_size"] or (challenged_data and bet_amount > challenged_data["progression"]["lund_size"]):
-        await message.reply(small_caps_bold("⌧ ʙᴇᴛ ᴀᴍᴏᴜɴᴛ ᴇxᴄᴇᴇᴅs ᴀᴠᴀɪʟᴀʙʟᴇ sɪᴢᴇ."))
+    if challenger_data.get("economy", {}).get("wallet", 0) < bet_amount:
+        await message.reply("⌧ ʏᴏᴜ ᴅᴏɴ'ᴛ ʜᴀᴠᴇ ᴇɴᴏᴜɢʜ ғᴜɴᴅs ɪɴ ʏᴏᴜʀ ᴡᴀʟʟᴇᴛ.")
         return
     
-    # --- Create PvP Request (or proceed directly for AI) ---
-    if is_ai:
-        await process_pvp_battle(client, challenger_id, challenged_id, bet_amount, message, is_ai) #Directly go to Battle
-    else:
-        #NO PENDING REQUESTS ANYMORE:
-        # request_key = (challenger_id, challenged_id)
+    # Check if the message is a reply
+    imaginary_battle = not message.reply_to_message
+    
+    if imaginary_battle:
+        # Imaginary battle against LundBot
+        if bet_amount > MAX_IMAGINARY_BET:
+            await message.reply(f"⌧ ᴍᴀxɪᴍᴜᴍ ʙᴇᴛ ғᴏʀ ɪᴍᴀɢɪɴᴀʀʏ ʙᴀᴛᴛʟᴇs ɪs {MAX_IMAGINARY_BET} ᴄᴍ.")
+            return
         
-        # if request_key in pending_pvp_requests:
-        #     await message.reply(small_caps_bold("⌧ ᴀ ᴘᴠᴘ ʀᴇǫᴜᴇsᴛ ɪs ᴀʟʀᴇᴀᴅʏ ᴘᴇɴᴅɪɴɢ."))
-        #     return
-
-        # # NO EXPIRATION: Remove 'expires'
-        # pending_pvp_requests[request_key] = {
-        #     "bet": bet_amount,
-        #     "message_id": None,  # Will be updated after sending the message
-        # }
-          
-        # --- Send Confirmation Request to Challenged User ---
+        await process_imaginary_battle(client, message, challenger_id, challenger_name, bet_amount)
+    else:
+        # Real battle with another user
+        challenged_user = message.reply_to_message.from_user
+        
+        # Ensure the challenged user is real (not a bot or the sender)
+        if challenged_user.is_bot or challenged_user.id == challenger_id:
+            await message.reply("⌧ ʏᴏᴜ ᴄᴀɴɴᴏᴛ ᴄʜᴀʟʟᴇɴɢᴇ ᴀ ʙᴏᴛ ᴏʀ ʏᴏᴜʀsᴇʟғ ᴛᴏ ᴀ ᴘᴠᴘ ʙᴀᴛᴛʟᴇ.")
+            return
+        
+        challenged_id = challenged_user.id
+        challenged_name = challenged_user.first_name
+        
+        # Check if challenged user has an account
+        challenged_data = await get_user_data(challenged_id)
+        if not challenged_data:
+            await message.reply(f"⌧ {challenged_name} ᴅᴏᴇsɴ'ᴛ ʜᴀᴠᴇ ᴀɴ ᴀᴄᴄᴏᴜɴᴛ.")
+            return
+        
+        # Check if challenged user has enough funds
+        if challenged_data.get("economy", {}).get("wallet", 0) < bet_amount:
+            await message.reply(f"⌧ {challenged_name} ᴅᴏᴇsɴ'ᴛ ʜᴀᴠᴇ ᴇɴᴏᴜɢʜ ғᴜɴᴅs.")
+            return
+        
+        # Create challenge
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ " + small_caps("Accept"), callback_data=f"pvp_accept_{challenger_id}_{challenged_id}_{bet_amount}"),
-             InlineKeyboardButton("❌ " + small_caps("Reject"), callback_data=f"pvp_reject_{challenger_id}_{challenged_id}")] #Added challenged_id
+            [
+                InlineKeyboardButton("ᴀᴄᴄᴇᴘᴛ ⚔️", callback_data=f"pvp_accept_{challenger_id}_{bet_amount}"),
+                InlineKeyboardButton("ᴅᴇᴄʟɪɴᴇ ❌", callback_data=f"pvp_decline_{challenger_id}")
+            ]
         ])
-
-        sent_message = await message.reply_to_message.reply_text(
-            f"⚔️ **{small_caps_bold('PvP Challenge!')}**\n\n"
-            f"{message.from_user.first_name} {small_caps('challenges you to a PvP battle!')}\n"
-            f"🔥 {small_caps_bold('Bet:')} **{bet_amount}cm**\n\n"
-            f"{small_caps('Do you accept?')}",
+        
+        challenge_msg = await message.reply(
+            f"⚔️ ᴘᴠᴘ ᴄʜᴀʟʟᴇɴɢᴇ!\n"
+            f"{challenger_name} ᴄʜᴀʟʟᴇɴɢᴇs ʏᴏᴜ ᴛᴏ ᴀ ᴘᴠᴘ ʙᴀᴛᴛʟᴇ!\n"
+            f"🔥 ʙᴇᴛ: {bet_amount} ᴄᴍ\n"
+            f"ᴅᴏ ʏᴏᴜ ᴀᴄᴄᴇᴘᴛ?",
             reply_markup=keyboard
         )
-          
-        # pending_pvp_requests[request_key]["message_id"] = sent_message.id #Not needed
+        
+        # Store the challenge
+        active_challenges[f"{challenger_id}_{challenged_id}"] = {
+            "challenger_id": challenger_id,
+            "challenger_name": challenger_name,
+            "challenged_id": challenged_id,
+            "challenged_name": challenged_name,
+            "bet_amount": bet_amount,
+            "message_id": challenge_msg.id,
+            "chat_id": message.chat.id,
+            "timestamp": time.time()
+        }
+        
+        # Set challenge expiry
+        asyncio.create_task(expire_challenge(f"{challenger_id}_{challenged_id}", challenge_msg))
 
-# --- Callback Query Handlers ---
-@shivuu.on_callback_query(filters.regex(r"^pvp_(accept|reject)_(\d+)_(\w+)_?([\d\.]+)?$"))
-async def handle_pvp_response(client: shivuu, callback_query):
-    action = callback_query.data.split("_")[1]
-    challenger_id = int(callback_query.data.split("_")[2])
-    challenged_id_str = callback_query.data.split("_")[3]  # Get as string
-    challenged_id = callback_query.from_user.id  # Always the user who clicked
-
-    # Check if the challenged user is the one clicking
-    if str(challenged_id) != challenged_id_str:  # Compare strings
-        await callback_query.answer("This is not for you!", show_alert=True)
-        return
-
-    #Retrieve bet_amount from callback data if exists:
-    try:
-        bet_amount_from_callback = float(callback_query.data.split("_")[4])
-    except:
-        bet_amount_from_callback = None
-
-    if action == "reject":
-      #del pending_pvp_requests[request_key] # No more requests
-        await callback_query.message.edit_text(f"⚔️ {callback_query.from_user.first_name} **{small_caps_bold('rejected')}** {small_caps('the PvP challenge.')}")
-        await callback_query.answer()
-        return
-
-    if action == "accept":
-        if bet_amount_from_callback is None: # Sanity check
-            await callback_query.answer("Error: Bet amount missing.", show_alert=True)
-            return
-        # del pending_pvp_requests[request_key]  # Remove BEFORE processing, no more requests
-        await callback_query.message.delete()
-        await callback_query.answer()
-        await process_pvp_battle(client, challenger_id, challenged_id_str, bet_amount_from_callback, callback_query.message)
-
-
-async def process_pvp_battle(client: shivuu, challenger_id: int, challenged_id: str, bet_amount: float, message: Message, is_ai: bool = False):
-
-    # --- Retrieve Data (handle possible missing data and AI) ---
-    challenger_data = await xy.find_one({"user_id": challenger_id})
+async def process_imaginary_battle(client, message, challenger_id, challenger_name, bet_amount):
+    """Process imaginary battle against LundBot"""
     
-    #Challenged data is not needed if is_ai is true:
-    challenged_data = None if challenged_id == "AI" else await xy.find_one({"user_id": int(challenged_id)}) #int conversion
-
-    if not challenger_data: #Shouldnt happen, but extra safety.
-      return
-
-    # --- Simulate Battle (Random Result) ---
-    if random.random() < 0.5:  # 50% chance for challenger to win
-        winner_data = challenger_data
-        loser_data = challenged_data
+    # 50/50 chance of winning
+    is_winner = random.choice([True, False])
+    
+    challenger_data = await get_user_data(challenger_id)
+    
+    # Get current lund size
+    current_lund_size = challenger_data.get("progression", {}).get("lund_size", 10)
+    
+    # Set rewards/penalties based on outcome
+    if is_winner:
+        # Winner gets rewards
+        new_lund_size = current_lund_size + (bet_amount * LUND_BASE_GROWTH)
+        reward_coins = 50
+        rating_change = 10
+        reputation_change = 10
+        wallet_change = bet_amount
+        
+        # Update win streak
+        await update_win_streak(challenger_id, True)
+        
+        # Update wins count
+        new_wins = challenger_data.get("combat_stats", {}).get("pvp", {}).get("wins", 0) + 1
+        
+        update_query = {
+            "$set": {
+                "progression.lund_size": new_lund_size,
+                "combat_stats.pvp.wins": new_wins,
+                "combat_stats.rating": challenger_data.get("combat_stats", {}).get("rating", 1000) + rating_change,
+                "social.reputation": challenger_data.get("social", {}).get("reputation", 0) + reputation_change
+            },
+            "$inc": {
+                "economy.wallet": wallet_change,
+                "economy.total_earned": reward_coins
+            }
+        }
+        
+        winner_name = challenger_name
+        loser_name = IMAGINARY_OPPONENT_NAME
         winner_id = challenger_id
-        loser_id = challenged_id if not is_ai else "AI"
-        winner_name = challenger_data["user_info"]["first_name"]
-        loser_name = "˹ᴅᴇɪꜰɪᴇᴅ ʙᴇɪɴɢ˼" if is_ai else challenged_data["user_info"]["first_name"]
-        winner_is_ai = False
-        loser_is_ai = is_ai
-
+        loser_lund_size = current_lund_size - (bet_amount * LUND_BASE_GROWTH / 2)
     else:
-        winner_data = challenged_data if challenged_data else {"user_id": "AI", "progression": {"lund_size": AI_MAX_BET}, "combat_stats":{"pvp": {"wins": 0, "losses": 0}}}  # AI "data" if needed.  Only used for size.
-        loser_data = challenger_data
-        winner_id = challenged_id if not is_ai else "AI"
-        loser_id = challenger_id
-        winner_name = "˹ᴅᴇɪꜰɪᴇᴅ ʙᴇɪɴɢ˼" if is_ai else challenged_data["user_info"]["first_name"]
-        loser_name = challenger_data["user_info"]["first_name"]
-        winner_is_ai = is_ai
-        loser_is_ai = False
-
+        # Loser gets penalties
+        new_lund_size = current_lund_size - (bet_amount * LUND_BASE_GROWTH / 2)
+        rating_change = 5
+        reputation_change = 5
+        wallet_change = -bet_amount
+        
+        # Update win streak (reset to 0)
+        await update_win_streak(challenger_id, False)
+        
+        # Update losses count
+        new_losses = challenger_data.get("combat_stats", {}).get("pvp", {}).get("losses", 0) + 1
+        
+        update_query = {
+            "$set": {
+                "progression.lund_size": new_lund_size,
+                "combat_stats.pvp.losses": new_losses,
+                "combat_stats.rating": max(1, challenger_data.get("combat_stats", {}).get("rating", 1000) - rating_change),
+                "social.reputation": max(0, challenger_data.get("social", {}).get("reputation", 0) - reputation_change)
+            },
+            "$inc": {
+                "economy.wallet": wallet_change
+            }
+        }
+        
+        winner_name = IMAGINARY_OPPONENT_NAME
+        loser_name = challenger_name
+        winner_id = None
+        loser_lund_size = new_lund_size
     
-    # --- Update Stats ---
-    #AI won't have progression so:
-    new_winner_size = round((winner_data["progression"]["lund_size"] if not winner_is_ai else AI_MAX_BET) + bet_amount, 1)
-    new_loser_size = round(max(1.0, (loser_data["progression"]["lund_size"] if not loser_is_ai else AI_MAX_BET ) - bet_amount), 1)
-
-    #Win rate calculation
-    if winner_data and not winner_is_ai:
-      winner_total_battles = winner_data.get("combat_stats", {}).get("pvp", {}).get("wins", 0) + winner_data.get("combat_stats", {}).get("pvp", {}).get("losses", 0) +1
-      winner_win_rate = round((winner_data.get("combat_stats", {}).get("pvp", {}).get("wins", 0) + 1) / winner_total_battles * 100, 2)
-      winner_streak = winner_data.get("combat_stats", {}).get("current_win_streak", 0) + 1
-      winner_max_streak = max(winner_data.get("combat_stats", {}).get("max_win_streak", 0), winner_streak)
-    else: # AI won
-      winner_total_battles = 1
-      winner_win_rate = 100.0
-      winner_streak = 1
-      winner_max_streak = 1
-      
-    if loser_data and not loser_is_ai:
-        loser_total_battles = loser_data.get("combat_stats", {}).get("pvp", {}).get("wins", 0) + loser_data.get("combat_stats", {}).get("pvp", {}).get("losses", 0) +1
-        loser_win_rate = round((loser_data.get("combat_stats", {}).get("pvp", {}).get("wins", 0)) / loser_total_battles * 100, 2)
-    else:  # AI lost. Shouldn't really happen, but handle it just in case
-        loser_total_battles = 1
-        loser_win_rate = 0.0
-
-
-    # --- Database Updates (using update_one for atomic operations) ---
-    # Winner update, only if not AI
-    if not winner_is_ai:
-        await xy.update_one(
-            {"user_id": winner_id},
-            {
-                "$set": {
-                    "progression.lund_size": new_winner_size,
-                    "combat_stats.last_pvp_time": datetime.utcnow(),
-                    "combat_stats.pvp.wins": winner_data.get("combat_stats", {}).get("pvp", {}).get("wins", 0) + 1,
-                    "combat_stats.current_win_streak": winner_streak,
-                    "combat_stats.max_win_streak": winner_max_streak
-                },
-                 "$inc": {"combat_stats.rating": DEFEATED_PLAYER_WIN_POINTS if not loser_is_ai else WIN_POINTS}
-            }
-        )
-    # Loser update, only if not AI
-    if not loser_is_ai:
-        await xy.update_one(
-            {"user_id": loser_id},
-            {
-                "$set": {
-                    "progression.lund_size": new_loser_size,
-                    "combat_stats.last_pvp_time": datetime.utcnow(),
-                    "combat_stats.pvp.losses": loser_data.get("combat_stats", {}).get("pvp", {}).get("losses", 0) + 1,
-                    "combat_stats.current_win_streak": 0
-                 },
-                 "$inc": {"combat_stats.rating": DEFEATED_PLAYER_LOSS_POINTS if winner_is_ai else LOSS_POINTS}
-            }
-        )
-
-    # --- Leaderboard Positions (using aggregation for accurate ranks)---
-
-    if not winner_is_ai:
-      winner_rank, total_users = await get_ranking(winner_id, new_winner_size)
-    else:
-      winner_rank = "-" # AI doesnt get ranked
-
-    if not loser_is_ai:
-      loser_rank, _ = await get_ranking(loser_id, new_loser_size)
-    else:
-      loser_rank = "-"
-
-    # --- Build Result Message ---
+    # Update user data
+    await update_user_data(challenger_id, update_query)
+    
+    # Get updated win rate and streak information
+    win_rate = await calculate_win_rate(challenger_id)
+    current_streak, max_streak = await get_win_streak(challenger_id)
+    
+    # Get top players for leaderboard
+    top_players = await get_top_players(2)
+    top1_name = top_players[0].get("user_info", {}).get("first_name", "Unknown") if len(top_players) > 0 else "Unknown"
+    top1_rank = await get_user_rank(top_players[0].get("user_id")) if len(top_players) > 0 else "N/A"
+    
+    top2_name = top_players[1].get("user_info", {}).get("first_name", "Unknown") if len(top_players) > 1 else "Unknown"
+    top2_rank = await get_user_rank(top_players[1].get("user_id")) if len(top_players) > 1 else "N/A"
+    
+    # Format result message
     result_message = (
-        "╭━━━━━━━━━━━━━━━━━━━━━━━━━╮\n"
-        f"🏆 **{small_caps_bold('Result')}** 🏆\n"
-        "╰━━━━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"👑 **{small_caps('The winner is')}** **{winner_name}**! 🎉\n"
-        f"🍆 **{small_caps('His lund is now')}** **{new_winner_size} cm** {small_caps('long!')}\n\n"
-        f"💀 **{small_caps('The loser\'s one is')}** **{new_loser_size} cm**... {small_caps('too bad.')}\n"
-        f"⚔️ **{small_caps_bold('The bet was')}** **{bet_amount} cm**.\n\n"
-        f"📊 **{small_caps_bold('Leaderboard Rankings:')}**\n"
-        f"🥇 **{winner_name}** - **{small_caps('Position:')} #{winner_rank}**\n"
-        f"🥈 **{loser_name}** - **{small_caps('Position:')} #{loser_rank}**\n\n"
-        f"🔥 **{small_caps('Win Stats for')} {winner_name}:**\n"
-        f"✅ **{small_caps('Win Rate:')}** **{winner_win_rate}%**\n"
-        f"💪 **{small_caps('Current Win Streak:')}** **{winner_streak}**\n"
-        f"🚀 **{small_caps('Max Win Streak:')}** **{winner_max_streak}**\n\n"
-        f"☠️ **{small_caps('Win Rate of the Loser:')}** **{loser_win_rate}%**\n"
-        "══════════════════════════════\n"
-        f"🔻 **{small_caps('Better luck next time...  grow bigger!')}** 🔻"
+        f"👑 ᴛʜᴇ ᴡɪɴɴᴇʀ ɪs {winner_name} 🎉\n"
+        f"🍆 ʜɪs ʟᴜɴᴅ ɪs ɴᴏᴡ {new_lund_size:.2f} cm ʟᴏɴɢ!\n"
+        f"💀 ᴛʜᴇ ʟᴏsᴇʀ's ᴏɴᴇ ɪs {loser_lund_size:.2f} cm... ᴛᴏᴏ ʙᴀᴅ.\n"
+        f"⚔️ ᴛʜᴇ ʙᴇᴛ ᴡᴀs {bet_amount} cm.\n\n"
+        f"📊 ʟᴇᴀᴅᴇʀʙᴏᴀʀᴅ ʀᴀɴᴋɪɴɢs:\n"
+        f"🥇 {top1_name} - ᴘᴏsɪᴛɪᴏɴ: #{top1_rank}\n"
+        f"🥈 {top2_name} - ᴘᴏsɪᴛɪᴏɴ: #{top2_rank}\n\n"
+        f"🔥 ᴡɪɴ sᴛᴀᴛs ғᴏʀ {winner_name}:\n"
+        f"✅ ᴡɪɴ ʀᴀᴛᴇ: {win_rate}%\n"
+        f"💪 ᴄᴜʀʀᴇɴᴛ ᴡɪɴ sᴛʀᴇᴀᴋ: {current_streak}\n"
+        f"🚀 ᴍᴀx ᴡɪɴ sᴛʀᴇᴀᴋ: {max_streak}\n\n"
+        f"☠️ ᴡɪɴ ʀᴀᴛᴇ ᴏғ ᴛʜᴇ ʟᴏsᴇʀ: {win_rate}%\n"
+        f"══════════════════════════════\n"
+        f"🔻 ʙᴇᴛᴛᴇʀ ʟᴜᴄᴋ ɴᴇxᴛ ᴛɪᴍᴇ..."
     )
+    
+    # Send result message
     await message.reply(result_message)
+
+@shivuu.on_callback_query(filters.regex(r"^pvp_(accept|decline)_(\d+)(?:_(\d+\.\d+|\d+))?$"))
+async def handle_pvp_callback(client, callback_query):
+    data = callback_query.data.split("_")
+    action = data[1]
+    challenger_id = int(data[2])
+    
+    # Only the challenged user should be able to interact with buttons
+    challenge_key = None
+    challenged_id = None
+    
+    for key, challenge in active_challenges.items():
+        if challenge["challenger_id"] == challenger_id and challenge["challenged_id"] == callback_query.from_user.id:
+            challenge_key = key
+            challenged_id = challenge["challenged_id"]
+            break
+    
+    if not challenge_key or callback_query.from_user.id != challenged_id:
+        await callback_query.answer("⌧ ᴛʜɪs ᴄʜᴀʟʟᴇɴɢᴇ ɪs ɴᴏᴛ ғᴏʀ ʏᴏᴜ.", show_alert=True)
+        return
+    
+    challenge = active_challenges[challenge_key]
+    
+    if action == "decline":
+        # Handle decline
+        await callback_query.message.edit_text(
+            f"⚔️ ᴘᴠᴘ ᴄʜᴀʟʟᴇɴɢᴇ ᴅᴇᴄʟɪɴᴇᴅ!\n"
+            f"{challenge['challenged_name']} ᴅᴇᴄʟɪɴᴇᴅ ᴛʜᴇ ᴘᴠᴘ ʙᴀᴛᴛʟᴇ ᴄʜᴀʟʟᴇɴɢᴇ ғʀᴏᴍ {challenge['challenger_name']}."
+        )
+        
+        # Remove the challenge
+        del active_challenges[challenge_key]
+        
+        await callback_query.answer("ʏᴏᴜ ᴅᴇᴄʟɪɴᴇᴅ ᴛʜᴇ ᴄʜᴀʟʟᴇɴɢᴇ.", show_alert=True)
+    
+    elif action == "accept":
+        bet_amount = float(data[3]) if len(data) > 3 else 0
+        
+        # Check if both users have enough funds
+        challenger_data = await get_user_data(challenger_id)
+        challenged_data = await get_user_data(challenged_id)
+        
+        if not challenger_data or not challenged_data:
+            await callback_query.message.edit_text("⌧ ᴏɴᴇ ᴏʀ ʙᴏᴛʜ ᴜsᴇʀs ᴅᴏ ɴᴏᴛ ʜᴀᴠᴇ ᴀɴ ᴀᴄᴄᴏᴜɴᴛ.")
+            del active_challenges[challenge_key]
+            return
+        
+        if (challenger_data.get("economy", {}).get("wallet", 0) < bet_amount or
+                challenged_data.get("economy", {}).get("wallet", 0) < bet_amount):
+            await callback_query.message.edit_text("⌧ ᴏɴᴇ ᴏʀ ʙᴏᴛʜ ᴜsᴇʀs ᴅᴏ ɴᴏᴛ ʜᴀᴠᴇ ᴇɴᴏᴜɢʜ ғᴜɴᴅs.")
+            del active_challenges[challenge_key]
+            return
+        
+        # Process the battle
+        await process_real_battle(client, callback_query, challenge)
+        
+        # Remove the challenge
+        del active_challenges[challenge_key]
+        
+        await callback_query.answer("ʏᴏᴜ ᴀᴄᴄᴇᴘᴛᴇᴅ ᴛʜᴇ ᴄʜᴀʟʟᴇɴɢᴇ.", show_alert=True)
+
+async def process_real_battle(client, callback_query, challenge):
+    """Process a real battle between two users"""
+    challenger_id = challenge["challenger_id"]
+    challenger_name = challenge["challenger_name"]
+    challenged_id = challenge["challenged_id"]
+    challenged_name = challenge["challenged_name"]
+    bet_amount = challenge["bet_amount"]
+    
+    # 50/50 chance of winning
+    is_challenger_winner = random.choice([True, False])
+    
+    challenger_data = await get_user_data(challenger_id)
+    challenged_data = await get_user_data(challenged_id)
+    
+    # Get current lund sizes
+    challenger_lund_size = challenger_data.get("progression", {}).get("lund_size", 10)
+    challenged_lund_size = challenged_data.get("progression", {}).get("lund_size", 10)
+    
+    # Set rewards/penalties based on outcome
+    if is_challenger_winner:
+        # Challenger wins
+        winner_id = challenger_id
+        loser_id = challenged_id
+        winner_name = challenger_name
+        loser_name = challenged_name
+        
+        winner_new_lund_size = challenger_lund_size + (bet_amount * LUND_BASE_GROWTH)
+        loser_new_lund_size = challenged_lund_size - (bet_amount * LUND_BASE_GROWTH / 2)
+    else:
+        # Challenged user wins
+        winner_id = challenged_id
+        loser_id = challenger_id
+        winner_name = challenged_name
+        loser_name = challenger_name
+        
+        winner_new_lund_size = challenged_lund_size + (bet_amount * LUND_BASE_GROWTH)
+        loser_new_lund_size = challenger_lund_size - (bet_amount * LUND_BASE_GROWTH / 2)
+    
+    # Update winner data
+    winner_data = await get_user_data(winner_id)
+    winner_new_wins = winner_data.get("combat_stats", {}).get("pvp", {}).get("wins", 0) + 1
+    
+    winner_update_query = {
+        "$set": {
+            "progression.lund_size": winner_new_lund_size,
+            "combat_stats.pvp.wins": winner_new_wins,
+            "combat_stats.rating": winner_data.get("combat_stats", {}).get("rating", 1000) + 50,
+            "social.reputation": winner_data.get("social", {}).get("reputation", 0) + 50
+        },
+        "$inc": {
+            "economy.wallet": bet_amount,
+            "economy.total_earned": 100
+        }
+    }
+    
+    await update_user_data(winner_id, winner_update_query)
+    await update_win_streak(winner_id, True)
+    
+    # Update loser data
+    loser_data = await get_user_data(loser_id)
+    loser_new_losses = loser_data.get("combat_stats", {}).get("pvp", {}).get("losses", 0) + 1
+    
+    loser_update_query = {
+        "$set": {
+            "progression.lund_size": loser_new_lund_size,
+            "combat_stats.pvp.losses": loser_new_losses,
+            "combat_stats.rating": max(1, loser_data.get("combat_stats", {}).get("rating", 1000) - 25),
+            "social.reputation": max(0, loser_data.get("social", {}).get("reputation", 0) - 25)
+        },
+        "$inc": {
+            "economy.wallet": -bet_amount
+        }
+    }
+    
+    await update_user_data(loser_id, loser_update_query)
+    await update_win_streak(loser_id, False)
+    
+    # Get updated win rates and streak information
+    winner_win_rate = await calculate_win_rate(winner_id)
+    loser_win_rate = await calculate_win_rate(loser_id)
+    current_streak, max_streak = await get_win_streak(winner_id)
+    
+    # Get top players for leaderboard
+    top_players = await get_top_players(2)
+    top1_name = top_players[0].get("user_info", {}).get("first_name", "Unknown") if len(top_players) > 0 else "Unknown"
+    top1_rank = await get_user_rank(top_players[0].get("user_id")) if len(top_players) > 0 else "N/A"
+    
+    top2_name = top_players[1].get("user_info", {}).get("first_name", "Unknown") if len(top_players) > 1 else "Unknown"
+    top2_rank = await get_user_rank(top_players[1].get("user_id")) if len(top_players) > 1 else "N/A"
+    
+    # Format result message
+    result_message = (
+        f"👑 ᴛʜᴇ ᴡɪɴɴᴇʀ ɪs {winner_name} 🎉\n"
+        f"🍆 ʜɪs ʟᴜɴᴅ ɪs ɴᴏᴡ {winner_new_lund_size:.2f} cm ʟᴏɴɢ!\n"
+        f"💀 ᴛʜᴇ ʟᴏsᴇʀ's ᴏɴᴇ ɪs {loser_new_lund_size:.2f} cm... ᴛᴏᴏ ʙᴀᴅ.\n"
+        f"⚔️ ᴛʜᴇ ʙᴇᴛ ᴡᴀs {bet_amount} cm.\n\n"
+        f"📊 ʟᴇᴀᴅᴇʀʙᴏᴀʀᴅ ʀᴀɴᴋɪɴɢs:\n"
+        f"🥇 {top1_name} - ᴘᴏsɪᴛɪᴏɴ: #{top1_rank}\n"
+        f"🥈 {top2_name} - ᴘᴏsɪᴛɪᴏɴ: #{top2_rank}\n\n"
+        f"🔥 ᴡɪɴ sᴛᴀᴛs ғᴏʀ {winner_name}:\n"
+        f"✅ ᴡɪɴ ʀᴀᴛᴇ: {winner_win_rate}%\n"
+        f"💪 ᴄᴜʀʀᴇɴᴛ ᴡɪɴ sᴛʀᴇᴀᴋ: {current_streak}\n"
+        f"🚀 ᴍᴀx ᴡɪɴ sᴛʀᴇᴀᴋ: {max_streak}\n\n"
+        f"☠️ ᴡɪɴ ʀᴀᴛᴇ ᴏғ ᴛʜᴇ ʟᴏsᴇʀ: {loser_win_rate}%\n"
+        f"══════════════════════════════\n"
+        f"🔻 ʙᴇᴛᴛᴇʀ ʟᴜᴄᴋ ɴᴇxᴛ ᴛɪᴍᴇ..."
+    )
+    
+    # Edit the challenge message with results
+    await callback_query.message.edit_text(result_message)
+
+async def expire_challenge(challenge_key, challenge_msg):
+    """Expire a challenge after 60 seconds"""
+    await asyncio.sleep(60)
+    
+    if challenge_key in active_challenges:
+        challenge = active_challenges[challenge_key]
+        
+        try:
+            await challenge_msg.edit_text(
+                f"⚔️ ᴘᴠᴘ ᴄʜᴀʟʟᴇɴɢᴇ ᴇxᴘɪʀᴇᴅ!\n"
+                f"ᴛʜᴇ ᴄʜᴀʟʟᴇɴ
