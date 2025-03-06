@@ -10,8 +10,8 @@ from datetime import datetime
 # Configuration
 CAPTCHA_LENGTH = 6
 CAPTCHA_EXPIRY = 10  # Seconds before the CAPTCHA expires
-FULL_REWARD_AMOUNT = 200  # Laudacoins for a full solve
-PARTIAL_REWARD_AMOUNT = 100 # Laudacoins for partial solve.
+FULL_REWARD_AMOUNT = 100  # Laudacoins for a full solve
+PARTIAL_REWARD_AMOUNT = 50 # Laudacoins for partial solve.
 STREAK_BONUS = 1  # Laudacoins per streak
 SOLVE_TIMEOUT = 20 # Seconds.
 
@@ -23,7 +23,7 @@ image_captcha = ImageCaptcha()
 
 def generate_captcha_code(length=CAPTCHA_LENGTH):
     """Generates a random alphanumeric CAPTCHA code."""
-    characters = "qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890@#₹_&-+()/*"':;!?,."  # Only numbers for simplicity
+    characters = "qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890@#₹_&-+()/*:;!?,."  # Only numbers for simplicity
     return "".join(random.choices(characters, k=length))
 
 
