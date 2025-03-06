@@ -10,7 +10,7 @@ from datetime import datetime
 
 # ⚙️ Config
 C_DURATION = 15
-B_REWARD = 100000
+B_REWARD = 100
 L_THRESHOLDS = [1000, 5000, 15000, 30000, 50000]
 
 # Global state
@@ -40,10 +40,10 @@ async def init_captcha(_, m: Message):
     
     sent = await m.reply_photo(
         photo=img,
-        caption=f"⎇ CAPTCHA CHALLENGE\n⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
+        caption=f"🔒 CAPTCHA CHALLENGE\n⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
                 f"⌞ Duration: {C_DURATION}s\n"
                 f"⌞ Level: {u_level}\n"
-                f"⌞ Type: c {code}"
+                f"⌞ Reply with: c [your answer]"
     )
     
     async with captcha_lock:
@@ -67,7 +67,7 @@ async def verify_solve(_, m: Message):
     
     c_id = m.chat.id
     u_id = m.from_user.id
-    guess = m.text.split(" ", 1)[1].strip()  # Extract text after "c "
+    guess = m.text.split(" ", 1)[1].strip()
 
     async with captcha_lock:
         captcha_data = active_captchas.get(c_id)
@@ -95,7 +95,9 @@ async def verify_solve(_, m: Message):
         )
         await m.reply(f"✅ Correct! +{reward} coins")
     else:
-        await m.reply(f"❌ Incorrect\nHint: {actual[:len(actual)//2]}...")
+        # Only show first character as hint
+        hint = actual[0] + "..." if len(actual) > 1 else actual[0]
+        await m.reply(f"❌ Incorrect\nFirst character: {hint}")
 
 # Helpers
 def generate_captcha_code(level=0):
