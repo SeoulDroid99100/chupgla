@@ -23,7 +23,7 @@ image_captcha = ImageCaptcha()
 
 def generate_captcha_code(length=CAPTCHA_LENGTH):
     """Generates a random alphanumeric CAPTCHA code."""
-    characters = "qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890"  # Only numbers for simplicity
+    characters = "qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890@#₹_&-+()/*"':;!?,."  # Only numbers for simplicity
     return "".join(random.choices(characters, k=length))
 
 
