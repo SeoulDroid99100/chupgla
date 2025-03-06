@@ -13,7 +13,7 @@ CAPTCHA_EXPIRY = 10  # Seconds before the CAPTCHA expires
 FULL_REWARD_AMOUNT = 200  # Laudacoins for a full solve
 PARTIAL_REWARD_AMOUNT = 100 # Laudacoins for partial solve.
 STREAK_BONUS = 5  # Laudacoins per streak
-SOLVE_TIMEOUT = 15 # Seconds.
+SOLVE_TIMEOUT = 20 # Seconds.
 
 # Store active CAPTCHAs: {chat_id: {"code": "123456", "expiry": <timestamp>, "message_id": <id>, "solvers":[]}}
 active_captchas = {}
