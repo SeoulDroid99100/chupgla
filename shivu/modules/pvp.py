@@ -60,8 +60,8 @@ async def calculate_percentage_smaller(user_id: int, current_size: float) -> flo
         print("Error calculating percentage")
         raise
 
-# --- Pending PvP Requests ---
-pending_pvp_requests = {}  # { (challenger_id, challenged_id): {"bet": bet_amount, "message_id": msg_id} }
+# --- Pending PvP Requests --- Removed pending requests
+# pending_pvp_requests = {}  # { (challenger_id, challenged_id): {"bet": bet_amount, "message_id": msg_id} }
 
 
 # --- PvP Command Handler ---
@@ -129,24 +129,25 @@ async def pvp_challenge(client: shivuu, message: Message):
     
     # --- Create PvP Request (or proceed directly for AI) ---
     if is_ai:
-        await process_pvp_battle(client, challenger_id, challenged_id, bet_amount, message) #Directly go to Battle
+        await process_pvp_battle(client, challenger_id, challenged_id, bet_amount, message, is_ai) #Directly go to Battle
     else:
-        request_key = (challenger_id, challenged_id)
+        #NO PENDING REQUESTS ANYMORE:
+        # request_key = (challenger_id, challenged_id)
         
-        if request_key in pending_pvp_requests:
-            await message.reply(small_caps_bold("⌧ ᴀ ᴘᴠᴘ ʀᴇǫᴜᴇsᴛ ɪs ᴀʟʀᴇᴀᴅʏ ᴘᴇɴᴅɪɴɢ."))
-            return
+        # if request_key in pending_pvp_requests:
+        #     await message.reply(small_caps_bold("⌧ ᴀ ᴘᴠᴘ ʀᴇǫᴜᴇsᴛ ɪs ᴀʟʀᴇᴀᴅʏ ᴘᴇɴᴅɪɴɢ."))
+        #     return
 
-        # NO EXPIRATION: Remove 'expires'
-        pending_pvp_requests[request_key] = {
-            "bet": bet_amount,
-            "message_id": None,  # Will be updated after sending the message
-        }
+        # # NO EXPIRATION: Remove 'expires'
+        # pending_pvp_requests[request_key] = {
+        #     "bet": bet_amount,
+        #     "message_id": None,  # Will be updated after sending the message
+        # }
           
         # --- Send Confirmation Request to Challenged User ---
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ " + small_caps("Accept"), callback_data=f"pvp_accept_{challenger_id}_{bet_amount}"),
-             InlineKeyboardButton("❌ " + small_caps("Reject"), callback_data=f"pvp_reject_{challenger_id}")]
+            [InlineKeyboardButton("✅ " + small_caps("Accept"), callback_data=f"pvp_accept_{challenger_id}_{challenged_id}_{bet_amount}"),
+             InlineKeyboardButton("❌ " + small_caps("Reject"), callback_data=f"pvp_reject_{challenger_id}_{challenged_id}")] #Added challenged_id
         ])
 
         sent_message = await message.reply_to_message.reply_text(
@@ -157,42 +158,50 @@ async def pvp_challenge(client: shivuu, message: Message):
             reply_markup=keyboard
         )
           
-        pending_pvp_requests[request_key]["message_id"] = sent_message.id
+        # pending_pvp_requests[request_key]["message_id"] = sent_message.id #Not needed
 
 # --- Callback Query Handlers ---
-@shivuu.on_callback_query(filters.regex(r"^pvp_(accept|reject)_(\d+)_?([\d\.]+)?$"))
+@shivuu.on_callback_query(filters.regex(r"^pvp_(accept|reject)_(\d+)_(\w+)_?([\d\.]+)?$"))
 async def handle_pvp_response(client: shivuu, callback_query):
     action = callback_query.data.split("_")[1]
     challenger_id = int(callback_query.data.split("_")[2])
-    challenged_id = callback_query.from_user.id
-    request_key = (challenger_id, challenged_id)
+    challenged_id_str = callback_query.data.split("_")[3]  # Get as string
+    challenged_id = callback_query.from_user.id  # Always the user who clicked
 
-    # NO EXPIRATION CHECK:  Still check for existence, but don't check expiration.
-    if request_key not in pending_pvp_requests:
-         await callback_query.answer(small_caps("This PvP request does not exist."), show_alert=True)
-         await callback_query.message.delete()  # Clean up the old message
-         return
+    # Check if the challenged user is the one clicking
+    if str(challenged_id) != challenged_id_str:  # Compare strings
+        await callback_query.answer("This is not for you!", show_alert=True)
+        return
 
+    #Retrieve bet_amount from callback data if exists:
+    try:
+        bet_amount_from_callback = float(callback_query.data.split("_")[4])
+    except:
+        bet_amount_from_callback = None
 
     if action == "reject":
-        del pending_pvp_requests[request_key]
+      #del pending_pvp_requests[request_key] # No more requests
         await callback_query.message.edit_text(f"⚔️ {callback_query.from_user.first_name} **{small_caps_bold('rejected')}** {small_caps('the PvP challenge.')}")
         await callback_query.answer()
         return
 
     if action == "accept":
-        bet_amount = pending_pvp_requests[request_key]["bet"]
-        del pending_pvp_requests[request_key]  # Remove BEFORE processing
+        if bet_amount_from_callback is None: # Sanity check
+            await callback_query.answer("Error: Bet amount missing.", show_alert=True)
+            return
+        # del pending_pvp_requests[request_key]  # Remove BEFORE processing, no more requests
         await callback_query.message.delete()
         await callback_query.answer()
-        await process_pvp_battle(client, challenger_id, challenged_id, bet_amount, callback_query.message)
+        await process_pvp_battle(client, challenger_id, challenged_id_str, bet_amount_from_callback, callback_query.message)
 
 
-async def process_pvp_battle(client: shivuu, challenger_id: int, challenged_id: str, bet_amount: float, message: Message):
+async def process_pvp_battle(client: shivuu, challenger_id: int, challenged_id: str, bet_amount: float, message: Message, is_ai: bool = False):
 
     # --- Retrieve Data (handle possible missing data and AI) ---
     challenger_data = await xy.find_one({"user_id": challenger_id})
-    challenged_data = None if challenged_id == "AI" else await xy.find_one({"user_id": challenged_id})
+    
+    #Challenged data is not needed if is_ai is true:
+    challenged_data = None if challenged_id == "AI" else await xy.find_one({"user_id": int(challenged_id)}) #int conversion
 
     if not challenger_data: #Shouldnt happen, but extra safety.
       return
@@ -202,29 +211,30 @@ async def process_pvp_battle(client: shivuu, challenger_id: int, challenged_id: 
         winner_data = challenger_data
         loser_data = challenged_data
         winner_id = challenger_id
-        loser_id = challenged_id
+        loser_id = challenged_id if not is_ai else "AI"
         winner_name = challenger_data["user_info"]["first_name"]
-        loser_name = "˹ᴅᴇɪꜰɪᴇᴅ ʙᴇɪɴɢ˼" if challenged_id == "AI" else challenged_data["user_info"]["first_name"]
+        loser_name = "˹ᴅᴇɪꜰɪᴇᴅ ʙᴇɪɴɢ˼" if is_ai else challenged_data["user_info"]["first_name"]
         winner_is_ai = False
-        loser_is_ai = True if challenged_id == "AI" else False
+        loser_is_ai = is_ai
 
     else:
-        winner_data = challenged_data if challenged_data else {"user_id": "AI", "progression": {"lund_size": AI_MAX_BET}, "combat_stats":{"pvp": {"wins": 0, "losses": 0}}}  # AI "data" if needed
+        winner_data = challenged_data if challenged_data else {"user_id": "AI", "progression": {"lund_size": AI_MAX_BET}, "combat_stats":{"pvp": {"wins": 0, "losses": 0}}}  # AI "data" if needed.  Only used for size.
         loser_data = challenger_data
-        winner_id = challenged_id
+        winner_id = challenged_id if not is_ai else "AI"
         loser_id = challenger_id
-        winner_name = "˹ᴅᴇɪꜰɪᴇᴅ ʙᴇɪɴɢ˼" if challenged_id == "AI" else challenged_data["user_info"]["first_name"]
+        winner_name = "˹ᴅᴇɪꜰɪᴇᴅ ʙᴇɪɴɢ˼" if is_ai else challenged_data["user_info"]["first_name"]
         loser_name = challenger_data["user_info"]["first_name"]
-        winner_is_ai = True if challenged_id == "AI" else False
+        winner_is_ai = is_ai
         loser_is_ai = False
 
     
     # --- Update Stats ---
-    new_winner_size = round(winner_data["progression"]["lund_size"] + bet_amount, 1) if winner_data else bet_amount
-    new_loser_size = round(max(1.0, (loser_data["progression"]["lund_size"] if loser_data else AI_MAX_BET ) - bet_amount), 1)
+    #AI won't have progression so:
+    new_winner_size = round((winner_data["progression"]["lund_size"] if not winner_is_ai else AI_MAX_BET) + bet_amount, 1)
+    new_loser_size = round(max(1.0, (loser_data["progression"]["lund_size"] if not loser_is_ai else AI_MAX_BET ) - bet_amount), 1)
 
     #Win rate calculation
-    if winner_data:
+    if winner_data and not winner_is_ai:
       winner_total_battles = winner_data.get("combat_stats", {}).get("pvp", {}).get("wins", 0) + winner_data.get("combat_stats", {}).get("pvp", {}).get("losses", 0) +1
       winner_win_rate = round((winner_data.get("combat_stats", {}).get("pvp", {}).get("wins", 0) + 1) / winner_total_battles * 100, 2)
       winner_streak = winner_data.get("combat_stats", {}).get("current_win_streak", 0) + 1
@@ -235,7 +245,7 @@ async def process_pvp_battle(client: shivuu, challenger_id: int, challenged_id: 
       winner_streak = 1
       winner_max_streak = 1
       
-    if loser_data:
+    if loser_data and not loser_is_ai:
         loser_total_battles = loser_data.get("combat_stats", {}).get("pvp", {}).get("wins", 0) + loser_data.get("combat_stats", {}).get("pvp", {}).get("losses", 0) +1
         loser_win_rate = round((loser_data.get("combat_stats", {}).get("pvp", {}).get("wins", 0)) / loser_total_battles * 100, 2)
     else:  # AI lost. Shouldn't really happen, but handle it just in case
@@ -244,8 +254,8 @@ async def process_pvp_battle(client: shivuu, challenger_id: int, challenged_id: 
 
 
     # --- Database Updates (using update_one for atomic operations) ---
-    # Winner update
-    if winner_id != "AI":
+    # Winner update, only if not AI
+    if not winner_is_ai:
         await xy.update_one(
             {"user_id": winner_id},
             {
@@ -256,11 +266,11 @@ async def process_pvp_battle(client: shivuu, challenger_id: int, challenged_id: 
                     "combat_stats.current_win_streak": winner_streak,
                     "combat_stats.max_win_streak": winner_max_streak
                 },
-                 "$inc": {"combat_stats.rating": DEFEATED_PLAYER_WIN_POINTS if not winner_is_ai and not loser_is_ai else WIN_POINTS}
+                 "$inc": {"combat_stats.rating": DEFEATED_PLAYER_WIN_POINTS if not loser_is_ai else WIN_POINTS}
             }
         )
-    # Loser update
-    if loser_id != "AI":
+    # Loser update, only if not AI
+    if not loser_is_ai:
         await xy.update_one(
             {"user_id": loser_id},
             {
@@ -270,18 +280,18 @@ async def process_pvp_battle(client: shivuu, challenger_id: int, challenged_id: 
                     "combat_stats.pvp.losses": loser_data.get("combat_stats", {}).get("pvp", {}).get("losses", 0) + 1,
                     "combat_stats.current_win_streak": 0
                  },
-                 "$inc": {"combat_stats.rating": DEFEATED_PLAYER_LOSS_POINTS if not winner_is_ai and not loser_is_ai else LOSS_POINTS}
+                 "$inc": {"combat_stats.rating": DEFEATED_PLAYER_LOSS_POINTS if winner_is_ai else LOSS_POINTS}
             }
         )
 
     # --- Leaderboard Positions (using aggregation for accurate ranks)---
 
-    if winner_id != "AI":
+    if not winner_is_ai:
       winner_rank, total_users = await get_ranking(winner_id, new_winner_size)
     else:
       winner_rank = "-" # AI doesnt get ranked
 
-    if loser_id != "AI":
+    if not loser_is_ai:
       loser_rank, _ = await get_ranking(loser_id, new_loser_size)
     else:
       loser_rank = "-"
