@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 # ⚙️ ᴄᴏɴғɪɢ
 C_ᴅᴜʀᴀᴛɪᴏɴ = 15
-B_ʀᴇᴡᴀʀᴅ = 100000
+B_ʀᴇᴡᴀʀᴅ = 100
 L_ᴛʜʀᴇsʜᴏʟᴅs = [1000, 5000, 15000, 30000, 50000]
 P_ᴄᴏsᴛs = {"ʜɪɴᴛ": 200, "ᴛɪᴍᴇ": 300, "ᴍᴜʟᴛ": 500}
 
@@ -99,7 +99,8 @@ async def init_captcha(_, m):
             await sent.edit_caption("⌞ ᴄᴀᴘᴛᴄʜᴀ ᴇxᴘɪʀᴇᴅ\n⎯⎯⎯⎯⎯⎯⎯⎯⎯")
             del active_captchas[c_id]
 
-@shivuu.on_message(filters.text & filters.group & ~filters.command)  # Fixed filter
+# Fixed filter syntax here (added parentheses)
+@shivuu.on_message(filters.text & filters.group & ~filters.command())
 async def verify_solve(_, m):
     if not m.from_user:
         return
@@ -126,7 +127,7 @@ async def verify_solve(_, m):
         
         async with captcha_lock:
             with suppress(KeyError):
-                # ʀᴇᴍᴏᴠᴇ ᴘᴏᴡᴇʀᴜᴘ
+                # ʀᴇᴍᴏᴠᴇ �ᴏᴡᴇʀᴜᴘ
                 mult = 2 if user_powerups.pop(u_id, None) else 1
                 reward *= mult
                 
