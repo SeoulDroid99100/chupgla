@@ -1,6 +1,5 @@
 import os
 import yt_dlp
-import ffmpeg_static
 from pathlib import Path
 from shivu import shivuu
 from pyrogram import filters
@@ -10,14 +9,11 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQ
 DOWNLOAD_PATH = Path.home() / "Downloads" / "youtube"
 DOWNLOAD_PATH.mkdir(parents=True, exist_ok=True)
 
-# Get ffmpeg path
-FFMPEG_PATH = ffmpeg_static.get_ffmpeg_path()
-
 # Store user choices temporarily
 USER_SELECTIONS = {}
 
 @shivuu.on_message(filters.regex(r"(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+"))
-async def youtube_download_handler(client: Client, message: Message):
+async def youtube_download_handler(client, message: Message):
     url = message.text
 
     try:
@@ -28,30 +24,27 @@ async def youtube_download_handler(client: Client, message: Message):
             video_title = info['title']
             formats = info.get('formats', [])
 
-        # Define desired resolutions
-        desired_resolutions = ['1080p', '720p', '480p', '360', '240', '144']
-        available_resolutions = []
-        resolution_mapping = {}
-
-        for res in desired_resolutions:
-            res_num = int(res[:-1])
-            for fmt in formats:
-                if (fmt.get('ext') == 'mp4' and fmt.get('height') == res_num and fmt.get('vcodec')):
-                    available_resolutions.append(res)
-                    resolution_mapping[res] = fmt['format_id']
-                    break
+        # Filter MP4 formats (single file, no separate audio)
+        available_resolutions = {}
+        for fmt in formats:
+            if fmt.get('ext') == 'mp4' and fmt.get('vcodec') and fmt.get('acodec'):
+                height = fmt.get('height', 0)
+                available_resolutions[str(height)] = fmt['format_id']
 
         if not available_resolutions:
-            await message.reply_text("No MP4 video streams found for 1080p, 720p, or 480p.")
+            await message.reply_text("No complete MP4 video streams found.")
             return
 
+        # Sort resolutions in descending order
+        available_resolutions = dict(sorted(available_resolutions.items(), key=lambda x: int(x[0]), reverse=True))
+
         # Store resolution mapping
-        USER_SELECTIONS[message.chat.id] = (url, resolution_mapping)
+        USER_SELECTIONS[message.chat.id] = (url, available_resolutions)
 
         # Send resolution selection buttons
         buttons = [
-            [InlineKeyboardButton(text=res, callback_data=f"yt_res_{res}")]
-            for res in available_resolutions
+            [InlineKeyboardButton(text=f"{res}p", callback_data=f"yt_res_{res}")]
+            for res in available_resolutions.keys()
         ]
         await message.reply_text(
             f"🎥 **{video_title}**\nChoose a resolution:",
@@ -62,23 +55,21 @@ async def youtube_download_handler(client: Client, message: Message):
         await message.reply_text(f"❌ Error: {e}")
 
 @shivuu.on_callback_query(filters.regex(r"yt_res_"))
-async def resolution_selected(client: Client, query: CallbackQuery):
+async def resolution_selected(client, query: CallbackQuery):
     chat_id = query.message.chat.id
     if chat_id not in USER_SELECTIONS:
         await query.answer("Session expired. Please send the link again.")
         return
 
-    url, resolution_mapping = USER_SELECTIONS.pop(chat_id)
+    url, available_resolutions = USER_SELECTIONS.pop(chat_id)
     selected_res = query.data.split("_")[-1]
 
-    await query.message.edit_text(f"⬇ Downloading in {selected_res}...")
+    await query.message.edit_text(f"⬇ Downloading in {selected_res}p...")
 
-    # Download with ffmpeg-static
+    # Download without FFmpeg (single MP4 file)
     ydl_opts = {
-        'format': f'bestvideo[height<={selected_res[:-1]}][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4][height<={selected_res[:-1]}]',
+        'format': available_resolutions[selected_res],
         'outtmpl': str(DOWNLOAD_PATH / '%(title)s.%(ext)s'),
-        'merge_output_format': 'mp4',
-        'ffmpeg_location': FFMPEG_PATH,
     }
 
     try:
