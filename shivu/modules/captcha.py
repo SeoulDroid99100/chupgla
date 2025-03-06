@@ -108,7 +108,7 @@ async def verify_solve(_, m):
     is_correct = guess == actual
     
     # ʀᴇᴡᴀʀᴅ ᴄᴀʟᴄ
-    reward = B_ʀᴇᴡᴀʀᴅ * (1 + (await get_user_level(u_id)) * 0.5
+    reward = B_ʀᴇᴡᴀʀᴅ * (1 + (await get_user_level(u_id)) * 0.5)
     if is_correct:
         # ᴘᴏᴡᴇʀᴜᴘ ʙᴏɴᴜs
         if u_id in user_powerups:
