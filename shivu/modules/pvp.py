@@ -1,8 +1,8 @@
-from pyrogram import Client, filters
+from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 import random
 import time
-from shivu import shivuu
+from shivu import shivuu , xy
 from datetime import datetime
 import asyncio
 import re
@@ -13,7 +13,7 @@ active_challenges = {}
 # Define constants
 IMAGINARY_OPPONENT_NAME = "LundBot"
 MAX_IMAGINARY_BET = 10
-LUND_BASE_GROWTH = 0.05  # Base growth factor for lund size
+LUND_BASE_GROWTH = 0.10  # Base growth factor for lund size
 
 async def get_user_data(user_id):
     """Fetch user data from database"""
