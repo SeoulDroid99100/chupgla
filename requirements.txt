@@ -14,3 +14,5 @@ nest_asyncio
 flask
 captcha
 Pillow
+ffmpeg-static
+yt-dlp
