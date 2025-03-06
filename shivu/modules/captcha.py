@@ -99,8 +99,12 @@ async def init_captcha(_, m):
             await sent.edit_caption("⌞ ᴄᴀᴘᴛᴄʜᴀ ᴇxᴘɪʀᴇᴅ\n⎯⎯⎯⎯⎯⎯⎯⎯⎯")
             del active_captchas[c_id]
 
-# Fixed filter syntax here (added parentheses)
-@shivuu.on_message(filters.text & filters.group & ~filters.command())
+# Fixed command filter using regex exclusion
+@shivuu.on_message(
+    filters.text 
+    & filters.group 
+    & ~filters.regex(r'^/')  # Exclude messages starting with '/'
+)
 async def verify_solve(_, m):
     if not m.from_user:
         return
@@ -127,7 +131,7 @@ async def verify_solve(_, m):
         
         async with captcha_lock:
             with suppress(KeyError):
-                # ʀᴇᴍᴏᴠᴇ �ᴏᴡᴇʀᴜᴘ
+                # ʀᴇᴍᴏᴠᴇ ᴘᴏᴡᴇʀᴜᴘ
                 mult = 2 if user_powerups.pop(u_id, None) else 1
                 reward *= mult
                 
