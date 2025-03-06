@@ -14,14 +14,14 @@ USER_SELECTIONS = {}
 
 @shivuu.on_message(filters.regex(r"(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+"))
 async def youtube_download_handler(client, message: Message):
-    url = message.text
+    url = message.text.strip()
 
     try:
-        # Extract video info
-        ydl_opts = {'quiet': True}
+        # Extract video info (No cookies, No FFmpeg)
+        ydl_opts = {'quiet': True, 'noplaylist': True, 'geo_bypass': True}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            video_title = info['title']
+            video_title = info.get('title', 'Unknown Video')
             formats = info.get('formats', [])
 
         # Filter MP4 formats (single file, no separate audio)
@@ -32,10 +32,10 @@ async def youtube_download_handler(client, message: Message):
                 available_resolutions[str(height)] = fmt['format_id']
 
         if not available_resolutions:
-            await message.reply_text("No complete MP4 video streams found.")
+            await message.reply_text("❌ No direct MP4 video streams found.")
             return
 
-        # Sort resolutions in descending order
+        # Sort resolutions (highest to lowest)
         available_resolutions = dict(sorted(available_resolutions.items(), key=lambda x: int(x[0]), reverse=True))
 
         # Store resolution mapping
@@ -70,6 +70,8 @@ async def resolution_selected(client, query: CallbackQuery):
     ydl_opts = {
         'format': available_resolutions[selected_res],
         'outtmpl': str(DOWNLOAD_PATH / '%(title)s.%(ext)s'),
+        'noplaylist': True,
+        'geo_bypass': True,
     }
 
     try:
@@ -85,7 +87,7 @@ async def resolution_selected(client, query: CallbackQuery):
         video_file = downloaded_files[0]
         await query.message.reply_video(video=str(video_file))
 
-        # Clean up
+        # Clean up file after sending
         os.remove(video_file)
 
     except Exception as e:
