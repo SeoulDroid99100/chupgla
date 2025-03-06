@@ -1,329 +1,171 @@
-# shivu/modules/captcha.py
-
+from io import BytesIO
+from captcha.image import ImageCaptcha
+from shivu import shivuu, xy
+from pyrogram import filters, enums
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 import random
 import asyncio
-from io import BytesIO
+from datetime import datetime
 
-from captcha.image import ImageCaptcha
-from captcha.audio import AudioCaptcha  # Import AudioCaptcha
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import CommandHandler, CallbackContext, filters
+# Configuration
+CAPTCHA_LENGTH = 6
+CAPTCHA_EXPIRY = 10  # Seconds before the CAPTCHA expires
+FULL_REWARD_AMOUNT = 200  # Laudacoins for a full solve
+PARTIAL_REWARD_AMOUNT = 100 # Laudacoins for partial solve.
+STREAK_BONUS = 5  # Laudacoins per streak
+SOLVE_TIMEOUT = 15 # Seconds.
 
-from shivu import application, user_collection, group_user_totals_collection, LOGGER, GROUP_ID, collection
+# Store active CAPTCHAs: {chat_id: {"code": "123456", "expiry": <timestamp>, "message_id": <id>, "solvers":[]}}
+active_captchas = {}
 
-# --- Helper Functions (Small Caps) ---
-
-def small_caps(text):
-    """Converts text to small caps (using Unicode characters)."""
-    small_caps_map = {
-        'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ғ', 'G': 'ɢ',
-        'H': 'ʜ', 'I': 'ɪ', 'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ',
-        'O': 'ᴏ', 'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ', 'S': 's', 'T': 'ᴛ', 'U': 'ᴜ',
-        'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x', 'Y': 'ʏ', 'Z': 'ᴢ'
-    }
-    return ''.join(small_caps_map.get(char.upper(), char) for char in text)
-
-def small_caps_bold(text):
-    """Converts to small caps and bolds."""
-    return f"**{small_caps(text)}**"
+image_captcha = ImageCaptcha()
 
 
-# --- Captcha Generation ---
+def generate_captcha_code(length=CAPTCHA_LENGTH):
+    """Generates a random alphanumeric CAPTCHA code."""
+    characters = "0123456789"  # Only numbers for simplicity
+    return "".join(random.choices(characters, k=length))
 
-def generate_captcha_text():
-    """Generates a 6-character alphanumeric captcha string."""
-    return ''.join(random.choices('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', k=6))  # Avoid similar chars
 
-def generate_captcha_image(text):
-    """Generates a captcha image from the given text (using default fonts)."""
-    image = ImageCaptcha()  # Use default fonts
-    data = image.generate(text)
+def create_captcha_image(code):
+    """Creates a CAPTCHA image from the code."""
+    image = image_captcha.generate_image(code)
     image_bytes = BytesIO()
-    image.write(text, image_bytes)
+    image.save(image_bytes, format="PNG")
     image_bytes.seek(0)
+    image_bytes.name = "captcha.png"
     return image_bytes
 
-def generate_audio_captcha(text):
-    """Generates an audio captcha."""
-    audio = AudioCaptcha()  # Use default voice
-    data = audio.generate(text)
-    audio_bytes = BytesIO(data)
-    audio_bytes.seek(0) # Reset stream
-    return audio_bytes
+
+async def get_user_data(user_id: int):
+    """Fetches user data."""
+    return await xy.find_one({"user_id": user_id})
 
 
-# --- Database Interaction ---
+async def update_streak(user_id: int, chat_id: int, correct: bool, full_solve: bool):
+    """Updates the user's streak based on solve correctness."""
+    user_data = await get_user_data(user_id)
+    if not user_data:
+        return  # Should not happen, but handle for safety
 
-async def get_character():
-    """Fetches a random character from the database."""
-    cursor = collection.aggregate([{"$sample": {"size": 1}}])
-    characters = await cursor.to_list(length=1)
-    return characters[0] if characters else None
+    streak_data = user_data.get("captcha_stats", {}).get("streak", {"count": 0, "chat_id": None})
+    current_streak = streak_data.get("count", 0)
+    streak_chat_id = streak_data.get("chat_id", None)
+    
+    if correct:
+        if streak_chat_id is None or streak_chat_id == chat_id: # Start or continue streak.
+            current_streak += 1
+            streak_chat_id = chat_id # Set the chat id, where streak started.
+        # else, streak remains as it is, in another group.
+    elif not full_solve and correct: # Partial Solve. Maintain but don't increase.
+        pass # Keep current streak.
+    else: # Incorrect.
+        current_streak = 0 # Break Streak
+        streak_chat_id = None
 
-async def add_character_to_user(user_id, character, guessed_type="partial"):
-    """Adds the character's value to the user's economy."""
-    user = await user_collection.find_one({'id': user_id})
+    await xy.update_one(
+        {"user_id": user_id},
+        {
+            "$set": {
+                "captcha_stats.streak.count": current_streak,
+                "captcha_stats.streak.chat_id": streak_chat_id,
+            }
+        },
+        upsert=True,
+    )
+    return current_streak
 
-    # Define character values based on rarity (adjust as needed)
-    rarity_values = {
-        "⚪ Common": 10,
-        "🟣 Rare": 25,
-        "🟡 Legendary": 50,
-        "🟢 Medium": 15,
-    }
+@shivuu.on_message(filters.command("io") & filters.group)
+async def start_captcha_challenge(client: shivuu, message: Message):
+    """Starts a new CAPTCHA challenge in the group."""
+    chat_id = message.chat.id
 
-    character_value = rarity_values.get(character['rarity'], 5)  # Default to 5 if rarity not found.
-
-    if user:
-        await user_collection.update_one(
-            {'id': user_id},
-            {'$inc': {'economy.wallet': character_value}}  # Increment wallet
+    # Check for existing active CAPTCHA
+    if chat_id in active_captchas:
+        # Add an inline button to the existing CAPTCHA message
+        existing_message_id = active_captchas[chat_id]["message_id"]
+        keyboard = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("🔗 Go to CAPTCHA", url=f"https://t.me/c/{str(chat_id).replace('-100', '')}/{existing_message_id}")]]
         )
-    else:
-        # Create user if they don't exist
-        await user_collection.insert_one({
-            'id': user_id,
-            'username': None,  # Fill from update later
-            'first_name': None, # Fill from update later
-            'economy': {'wallet': character_value, 'bank': 0},  # Initialize economy
-            'characters': [] # Still needed for streaks
-        })
-
-    # Update streak
-    streak_key = 'streak_full' if guessed_type == 'full' else 'streak_partial'
-    await user_collection.update_one({'id': user_id}, {'$inc': {streak_key: 1}})
-
-
-async def get_streak(user_id, guessed_type="partial"):
-    """Retrieves the user's current streak."""
-    user = await user_collection.find_one({'id': user_id})
-    if user:
-        streak_key = 'streak_full' if guessed_type == 'full' else 'streak_partial'
-        return user.get(streak_key, 0)  # Return 0 if streak doesn't exist.
-    return 0
-
-async def reset_streak(user_id, guessed_type="partial"):
-    """Resets user's streak for a given type."""
-    streak_key = 'streak_full' if guessed_type == 'full' else 'streak_partial'
-    await user_collection.update_one({'id': user_id}, {'$set': {streak_key: 0}})
-
-
-
-async def update_group_totals(chat_id, user_id):
-    """Updates group and user total guesses."""
-
-    group_totals = await group_user_totals_collection.find_one({'group_id': chat_id})
-    if group_totals:
-        await group_user_totals_collection.update_one(
-            {'group_id': chat_id, 'users.user_id': user_id},
-            {'$inc': {'users.$.count': 1, 'count': 1}},
-            upsert=True
-        )
-        # Check if the user exists in the users array. Add if missing.
-        if not any(user['user_id'] == user_id for user in group_totals['users']):
-             await group_user_totals_collection.update_one(
-                {'group_id': chat_id},
-                {'$push': {'users': {'user_id': user_id, 'count': 1}}}
-             )
-
-    else:
-        await group_user_totals_collection.insert_one({
-            'group_id': chat_id,
-            'group_name': None,
-            'count': 1,
-            'users': [{'user_id': user_id, 'count': 1}]
-        })
-
-
-    # *Also* update the global top groups
-    await top_global_groups_collection.update_one(
-        {'group_id': chat_id},
-        {'$inc': {'count': 1}},
-        upsert=True
-    )
-
-
-async def set_group_name(chat_id, group_name):
-    """Updates the group name in the database."""
-    await group_user_totals_collection.update_one(
-        {'group_id': chat_id},
-        {'$set': {'group_name': group_name}},
-        upsert=True  # Create if it doesn't exist
-    )
-    await top_global_groups_collection.update_one(
-        {'group_id': chat_id},
-        {'$set': {'group_name': group_name}},
-        upsert=True  # Create if it doesn't exist
-    )
-
-
-
-# --- Main /guess Logic ---
-async def send_captcha(update: Update, context: CallbackContext):
-    """Sends a captcha (image or audio) and starts the guessing."""
-    chat_id = update.effective_chat.id
-
-    if chat_id != GROUP_ID: #Correctly checks for group ID, not just negative chat IDs.
-      return
-
-    character = await get_character()
-    if not character:
-        await context.bot.send_message(chat_id, "❌ Failed to fetch character data.")
+        await message.reply("⚠️ An unsolved CAPTCHA is already active!", reply_markup=keyboard)
         return
 
-    captcha_text = generate_captcha_text()
-    context.chat_data['captcha_answer'] = captcha_text
-    context.chat_data['character'] = character
+    # Generate CAPTCHA
+    code = generate_captcha_code()
+    image = create_captcha_image(code)
 
-    # Determine captcha type (audio every 4th)
-    if 'captcha_count' not in context.chat_data:
-        context.chat_data['captcha_count'] = 0
-    context.chat_data['captcha_count'] += 1
+    # Send CAPTCHA image
+    sent_message = await message.reply_photo(
+        photo=image,
+        caption=f"✍️ Solve the CAPTCHA to win Laudacoins! Reply with the code. You have {CAPTCHA_EXPIRY} seconds!",  # Removed /solve
+    )
 
-    if context.chat_data['captcha_count'] % 4 == 0:
-        # Audio Captcha
-        captcha_data = generate_audio_captcha(captcha_text)
-        caption = f"🎧 {small_caps('Listen to the Captcha to Catch')} {small_caps_bold(character['name'])} 🔊"
-        sent_message = await context.bot.send_audio(
-            chat_id,
-            audio=captcha_data,
-            caption=caption,
-             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(f"🔄 {small_caps('Replay')}", callback_data="replay_audio")]
-            ])
-        )
-    else:
-        # Image Captcha
-        captcha_data = generate_captcha_image(captcha_text)
-        caption = f"👇 {small_caps('Unscramble this Captcha to Catch')} {small_caps_bold(character['name'])} 💬"
-        sent_message = await context.bot.send_photo(
-            chat_id,
-            photo=captcha_data,
-            caption=caption,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(f"⏱️ {small_caps('Hint: Starts with')} '{captcha_text[0]}'", callback_data="hint")]
-            ])
-        )
-
-    context.chat_data['captcha_message_id'] = sent_message.message_id
-    context.job_queue.run_once(delete_captcha, 30, chat_id=chat_id, data=sent_message.message_id, name=str(sent_message.message_id))
+        # Store CAPTCHA details
+    active_captchas[chat_id] = {
+        "code": code,
+        "timestamp": datetime.utcnow(),
+        "message_id": sent_message.id,  # Store the message ID
+        "solvers": [] # Keep track of users who have attempted.
+    }
 
 
-async def delete_captcha(context: CallbackContext):
-    """Deletes the captcha message and clears data."""
-    chat_id = context.job.chat_id
-    message_id = context.job.data  # Retrieve message_id
-
-    try:
-        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
-        # Clear captcha data *only* if the message was deleted.
-        if 'captcha_answer' in context.chat_data:
-            del context.chat_data['captcha_answer']
-        if 'character' in context.chat_data:
-            del context.chat_data['character']
-        if 'captcha_message_id' in context.chat_data:
-             del context.chat_data['captcha_message_id']
-
-    except Exception as e:
-        LOGGER.error(f"Failed to delete message {message_id} in chat {chat_id}: {e}")
-        # No need to clear chat_data here, as we *only* clear if deletion succeeded.
-
-
-async def guess_captcha(update: Update, context: CallbackContext):
-    """Handles user's guess."""
-    user_id = update.effective_user.id
-    chat_id = update.effective_chat.id
-    guess = update.message.text.split(" ", 1)[1].strip().upper() if len(update.message.text.split(" ", 1)) > 1 else ""
-
-    if 'captcha_answer' not in context.chat_data or 'character' not in context.chat_data:
-        return  # No active captcha
-
-    correct_answer = context.chat_data['captcha_answer']
-    character = context.chat_data['character']
-    captcha_message_id = context.chat_data.get('captcha_message_id')
-
-    # Get user data to use first_name and username later
-    user_data = await user_collection.find_one({'id': user_id})
-    if user_data:
-        username = user_data.get('username')
-        first_name = user_data.get('first_name')
-    else:  # User doesn't exist yet, get from update.  This handles new users *much* better.
-        username = update.effective_user.username
-        first_name = update.effective_user.first_name
-
-    if guess == correct_answer:
-        guessed_type = "full"
-        streak = await get_streak(user_id, guessed_type)
-        reward = 200 + streak
-
-        await update.message.reply_text(
-            f"🎉 {small_caps('JACKPOT!')} {first_name} {small_caps('caught')} {small_caps_bold(character['name'])}! 🌟\n"
-            f"💰 {small_caps('Reward:')} {reward} ʟᴀᴜᴅᴀᴄᴏɪɴꜱ"
-        )
-
-        await add_character_to_user(user_id, character, guessed_type)
-        await update_group_totals(chat_id, user_id)
-        context.job_queue.remove_job_if_exists(str(captcha_message_id))
-        await delete_captcha(context)
-        if update.effective_chat.title:
-            await set_group_name(chat_id, update.effective_chat.title)
-
-        # Update user data with latest username/first_name.  Do this *after* the guess.
-        await user_collection.update_one({'id': user_id}, {'$set': {'username': username, 'first_name': first_name}}, upsert=True)
-
-    elif guess.startswith(correct_answer[0]):
-        if guess == correct_answer:
-             pass
-        else:
-            guessed_type = "partial"
-            streak = await get_streak(user_id, guessed_type)
-            reward = 100 + streak
-
-            await update.message.reply_text(
-                f"🎉 {small_caps('Nice Try!')} {first_name} {small_caps('caught')} {small_caps_bold(character['name'])}! ✅\n"
-                f"💰 {small_caps('Reward:')} {reward} ʟᴀᴜᴅᴀᴄᴏɪɴꜱ"
-            )
-            await add_character_to_user(user_id, character, guessed_type)
-            await update_group_totals(chat_id, user_id)
-            context.job_queue.remove_job_if_exists(str(captcha_message_id))
-            await delete_captcha(context)
-            if update.effective_chat.title:
-                await set_group_name(chat_id, update.effective_chat.title)
-
-            # Update user data with latest username/first_name
-            await user_collection.update_one({'id': user_id}, {'$set': {'username': username, 'first_name': first_name}}, upsert=True)
-
-
-    else:
-        await reset_streak(user_id)
-        await update.message.reply_text(f"❌ {small_caps('Oops! Incorrect guess.')} {small_caps('Better luck next time!')}")
-
-# --- Callback Query Handlers ---
-
-async def hint_callback(update: Update, context: CallbackContext):
-    """Handles the hint button (does nothing, just acknowledges)."""
-    await update.callback_query.answer("Here's your hint!")
-
-async def replay_audio_callback(update: Update, context: CallbackContext):
-    """Replays the audio captcha."""
-    if 'captcha_answer' in context.chat_data:
-        captcha_text = context.chat_data['captcha_answer']
-        captcha_data = generate_audio_captcha(captcha_text)
-        await context.bot.send_audio(
-            update.effective_chat.id,
-            audio=captcha_data,
-            caption=f"🎧 {small_caps('Replaying the audio captcha')}"
-        )
-        await update.callback_query.answer()  # Acknowledge the button press
-    else:
-        await update.callback_query.answer(f"{small_caps('No active audio captcha to replay.')}")
+    # Schedule automatic expiration
+    await asyncio.sleep(CAPTCHA_EXPIRY)
+    if chat_id in active_captchas and active_captchas[chat_id]["timestamp"] == active_captchas[chat_id]["timestamp"] :
+        del active_captchas[chat_id]
+        await sent_message.edit_caption(caption="❌ CAPTCHA expired!")
 
 
 
-# --- Register Handlers ---
-# Put ~filters.COMMAND for making /guess a reply only command
-application.add_handler(CommandHandler("guess", guess_captcha, filters=filters.ChatType.GROUPS & ~filters.COMMAND, block=False))
-# Start with /g
-application.add_handler(CommandHandler("g", send_captcha, filters=filters.ChatType.GROUPS, block=False))
-application.add_handler(telegram.ext.CallbackQueryHandler(hint_callback, pattern="^hint$", block=False))
-application.add_handler(telegram.ext.CallbackQueryHandler(replay_audio_callback, pattern="^replay_audio$", block=False))
+@shivuu.on_message(filters.regex(r"^[0-9]{6}$") & filters.group, group=1)  # Regex for 6-digit numbers, higher group.
+async def solve_captcha(client: shivuu, message: Message):
+    """Handles user's CAPTCHA solution (now directly from message text)."""
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    guess = message.text  # Directly use the message text
+
+    # Check if a CAPTCHA is active
+    if chat_id not in active_captchas:
+        return # No active captcha, ignore
+
+    # Check for timeout
+    time_since_captcha = (datetime.utcnow() - active_captchas[chat_id]["timestamp"]).total_seconds()
+    if time_since_captcha > SOLVE_TIMEOUT:
+        return # Ignore, too late.
+
+
+    # Check if the user has an account
+    user_data = await get_user_data(user_id)
+    if not user_data:
+        await message.reply("❌ Account not found! Use /lstart to register.")
+        return
+
+    correct_code = active_captchas[chat_id]["code"]
+    is_full_solve = guess == correct_code
+    is_partial_solve = len(guess) == CAPTCHA_LENGTH-1 and guess == correct_code[1:]
+
+    # Prevent multiple solves by same user.
+    if user_id in active_captchas[chat_id]["solvers"]:
+        return # Already solved, ignore.
+    active_captchas[chat_id]["solvers"].append(user_id)
+
+
+    if is_full_solve or is_partial_solve:
+        current_streak = await update_streak(user_id, chat_id, True, is_full_solve) # Update and get current.
+        if is_full_solve:
+            reward = FULL_REWARD_AMOUNT + (current_streak * STREAK_BONUS)
+            await xy.update_one({"user_id": user_id}, {"$inc": {"economy.wallet": reward}})
+            await message.reply(f"✅ Correct! {message.from_user.first_name} solved the CAPTCHA and won {reward} Laudacoins! (Streak: {current_streak})")
+            del active_captchas[chat_id] # Remove on full solve.
+
+        elif is_partial_solve:
+            reward = PARTIAL_REWARD_AMOUNT + (current_streak * STREAK_BONUS)
+            await xy.update_one({"user_id": user_id}, {"$inc": {"economy.wallet": reward}})
+            await message.reply(f"☑️ Partially Correct! {message.from_user.first_name} got a partial solve and won {reward} Laudacoins! (Streak maintained: {current_streak})")
+            await update_streak(user_id, chat_id, False, is_full_solve) # is_correct = False, for maintainence.
+
+    else: # Incorrect solve.
+        current_streak = await update_streak(user_id, chat_id, False, is_full_solve) # Break streak.
+        await message.reply("❌ Incorrect. Please try again.")
+        if current_streak > 0: # If user broke the streak.
+          await message.reply(f"💔 Your streak of {current_streak} has been broken!")
