@@ -10,7 +10,7 @@ from datetime import datetime
 
 # ⚙️ Config
 C_DURATION = 15
-B_REWARD = 100
+B_REWARD = 10000
 L_THRESHOLDS = [1000, 5000, 15000, 30000, 50000]
 
 # Global state
