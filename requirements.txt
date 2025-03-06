@@ -13,3 +13,4 @@ psutil
 nest_asyncio
 flask
 captcha
+Pillow
