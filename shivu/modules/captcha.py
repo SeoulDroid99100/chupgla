@@ -5,167 +5,193 @@ from pyrogram import filters, enums
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 import random
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Configuration
 CAPTCHA_LENGTH = 6
-CAPTCHA_EXPIRY = 10  # Seconds before the CAPTCHA expires
-FULL_REWARD_AMOUNT = 100  # Laudacoins for a full solve
-PARTIAL_REWARD_AMOUNT = 50 # Laudacoins for partial solve.
-STREAK_BONUS = 1  # Laudacoins per streak
-SOLVE_TIMEOUT = 20 # Seconds.
+CAPTCHA_EXPIRY = 15  # Increased time for more engagement
+BASE_REWARD = 100
+STREAK_BONUS = 0.1  # 10% bonus per streak
+DAILY_BONUS_MULTIPLIER = 2
+MAX_STREAK_MULTIPLIER = 3  # Max 3x multiplier for streaks
+LEVEL_THRESHOLDS = [1000, 5000, 15000, 30000, 50000]  # Coin thresholds for levels
+POWERUP_COSTS = {"hint": 200, "time": 300, "multiplier": 500}
 
-# Store active CAPTCHAs: {chat_id: {"code": "123456", "expiry": <timestamp>, "message_id": <id>, "solvers":[]}}
 active_captchas = {}
-
+user_powerups = {}
 image_captcha = ImageCaptcha()
 
+# New Helper Functions
+async def get_leaderboard(chat_id=None):
+    pipeline = [
+        {"$sort": {"economy.wallet": -1}},
+        {"$limit": 10},
+        {"$project": {"user_id": 1, "economy.wallet": 1, "captcha_stats": 1}}
+    ]
+    return [user async for user in xy.aggregate(pipeline)]
 
-def generate_captcha_code(length=CAPTCHA_LENGTH):
-    """Generates a random alphanumeric CAPTCHA code."""
-    characters = "qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890@#₹_&-+()/*:;!?,."  # Only numbers for simplicity
-    return "".join(random.choices(characters, k=length))
-
-
-def create_captcha_image(code):
-    """Creates a CAPTCHA image from the code."""
-    image = image_captcha.generate_image(code)
-    image_bytes = BytesIO()
-    image.save(image_bytes, format="PNG")
-    image_bytes.seek(0)
-    image_bytes.name = "captcha.png"
-    return image_bytes
-
-
-async def get_user_data(user_id: int):
-    """Fetches user data."""
-    return await xy.find_one({"user_id": user_id})
-
-
-async def update_streak(user_id: int, chat_id: int, correct: bool, full_solve: bool):
-    """Updates the user's streak based on solve correctness."""
-    user_data = await get_user_data(user_id)
-    if not user_data:
-        return  # Should not happen, but handle for safety
-
-    streak_data = user_data.get("captcha_stats", {}).get("streak", {"count": 0, "chat_id": None})
-    current_streak = streak_data.get("count", 0)
-    streak_chat_id = streak_data.get("chat_id", None)
-    
-    if correct:
-        if streak_chat_id is None or streak_chat_id == chat_id: # Start or continue streak.
-            current_streak += 1
-            streak_chat_id = chat_id # Set the chat id, where streak started.
-        # else, streak remains as it is, in another group.
-    elif not full_solve and correct: # Partial Solve. Maintain but don't increase.
-        pass # Keep current streak.
-    else: # Incorrect.
-        current_streak = 0 # Break Streak
-        streak_chat_id = None
-
-    await xy.update_one(
-        {"user_id": user_id},
-        {
-            "$set": {
-                "captcha_stats.streak.count": current_streak,
-                "captcha_stats.streak.chat_id": streak_chat_id,
-            }
-        },
-        upsert=True,
-    )
-    return current_streak
-
-@shivuu.on_message(filters.command("io") & filters.group)
-async def start_captcha_challenge(client: shivuu, message: Message):
-    """Starts a new CAPTCHA challenge in the group."""
-    chat_id = message.chat.id
-
-    # Check for existing active CAPTCHA
-    if chat_id in active_captchas:
-        # Add an inline button to the existing CAPTCHA message
-        existing_message_id = active_captchas[chat_id]["message_id"]
-        keyboard = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("🔗 Go to CAPTCHA", url=f"https://t.me/c/{str(chat_id).replace('-100', '')}/{existing_message_id}")]]
+async def award_achievement(user_id, achievement):
+    achievements = (await xy.find_one({"user_id": user_id})).get("achievements", [])
+    if achievement not in achievements:
+        await xy.update_one(
+            {"user_id": user_id},
+            {"$push": {"achievements": achievement}},
+            upsert=True
         )
-        await message.reply("⚠️ An unsolved CAPTCHA is already active!", reply_markup=keyboard)
+        return True
+    return False
+
+# Modified Captcha Generation with Difficulty
+def generate_captcha_code(user_level=0):
+    chars = "qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890@#₹_&-+()/*:;!?,."
+    length = CAPTCHA_LENGTH + min(user_level // 3, 3)  # Increase length every 3 levels
+    return "".join(random.choices(chars, k=length))
+
+# Enhanced Reward Calculation
+async def calculate_rewards(user_id, is_full_solve):
+    user = await xy.find_one({"user_id": user_id})
+    wallet = user["economy"]["wallet"]
+    
+    # Level calculation
+    level = sum(1 for threshold in LEVEL_THRESHOLDS if wallet >= threshold)
+    reward = BASE_REWARD * (1 + level * 0.5)  # 50% increase per level
+    
+    # Streak multiplier
+    streak = user.get("captcha_stats", {}).get("streak", {}).get("count", 0)
+    streak_multiplier = min(1 + (streak * STREAK_BONUS), MAX_STREAK_MULTIPLIER)
+    
+    # Daily bonus check
+    last_daily = user.get("last_daily", datetime.min)
+    daily_multiplier = DAILY_BONUS_MULTIPLIER if (datetime.utcnow() - last_daily) < timedelta(hours=23) else 1
+    
+    # Powerup multiplier
+    powerup = user_powerups.get(user_id, {}).get("multiplier", 1)
+    
+    total = reward * streak_multiplier * daily_multiplier * powerup
+    return round(total if is_full_solve else total * 0.7), level  # 70% for partial
+
+# New Powerup System
+@shivuu.on_message(filters.command("powerup"))
+async def powerup_menu(client, message):
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"🔍 Hint ({POWERUP_COSTS['hint']} coins)", callback_data="hint"),
+         InlineKeyboardButton(f"⏳ +5s Time ({POWERUP_COSTS['time']} coins)", callback_data="time")],
+        [InlineKeyboardButton(f"🎯 2x Multiplier ({POWERUP_COSTS['multiplier']} coins)", callback_data="multiplier")]
+    ])
+    await message.reply("💎 Powerup Shop:", reply_markup=keyboard)
+
+@shivuu.on_callback_query()
+async def handle_powerups(client, query):
+    user_data = await xy.find_one({"user_id": query.from_user.id})
+    choice = query.data
+    cost = POWERUP_COSTS.get(choice, 0)
+    
+    if user_data["economy"]["wallet"] >= cost:
+        await xy.update_one({"user_id": query.from_user.id}, {"$inc": {"economy.wallet": -cost}})
+        user_powerups[query.from_user.id] = {"multiplier": 2, "expiry": datetime.utcnow() + timedelta(minutes=10)}
+        await query.answer("Powerup activated! Next captcha will have 2x rewards!")
+    else:
+        await query.answer("Not enough coins!")
+
+# Enhanced Captcha Handler with New Features
+@shivuu.on_message(filters.command("io") & filters.group)
+async def start_captcha_challenge(client, message):
+    chat_id = message.chat.id
+    if chat_id in active_captchas:
+        await message.reply("⚠️ A captcha is already active! Solve it first!")
         return
 
-    # Generate CAPTCHA
-    code = generate_captcha_code()
+    # Get user level for difficulty scaling
+    user_level = sum(1 for threshold in LEVEL_THRESHOLDS 
+                    if (await xy.find_one({"user_id": message.from_user.id}))["economy"]["wallet"] >= threshold)
+    
+    code = generate_captcha_code(user_level)
     image = create_captcha_image(code)
-
-    # Send CAPTCHA image
-    sent_message = await message.reply_photo(
+    
+    # Add powerup hints
+    hint = ""
+    if random.random() < 0.3:  # 30% chance of free hint
+        hint = f"\n\n💡 Hint: Starts with '{code[0]}'"
+    
+    sent = await message.reply_photo(
         photo=image,
-        caption=f"✍️ Solve the CAPTCHA to win Laudacoins! Reply with the code. You have {CAPTCHA_EXPIRY} seconds!",  # Removed /solve
+        caption=f"🔐 Solve the CAPTCHA to earn coins!{hint}\n"
+                f"⏳ Time: {CAPTCHA_EXPIRY}s | 💎 Streak Multiplier: {MAX_STREAK_MULTIPLIER}x\n"
+                f"💬 Reply with the code now!"
     )
 
-        # Store CAPTCHA details
     active_captchas[chat_id] = {
         "code": code,
-        "timestamp": datetime.utcnow(),
-        "message_id": sent_message.id,  # Store the message ID
-        "solvers": [] # Keep track of users who have attempted.
+        "start_time": datetime.utcnow(),
+        "message_id": sent.id,
+        "solvers": [],
+        "hints_used": {}
     }
 
-
-    # Schedule automatic expiration
+    # Auto-expiry
     await asyncio.sleep(CAPTCHA_EXPIRY)
-    if chat_id in active_captchas and active_captchas[chat_id]["timestamp"] == active_captchas[chat_id]["timestamp"] :
+    if chat_id in active_captchas:
+        await sent.edit_caption("⌛ Time's up! Captcha expired!")
         del active_captchas[chat_id]
-        await sent_message.edit_caption(caption="❌ CAPTCHA expired!")
 
-
-
-@shivuu.on_message(filters.regex(r"^[0-9]{6}$") & filters.group, group=1)  # Regex for 6-digit numbers, higher group.
-async def solve_captcha(client: shivuu, message: Message):
-    """Handles user's CAPTCHA solution (now directly from message text)."""
+# Enhanced Solve Handler
+@shivuu.on_message(filters.text & filters.group)
+async def solve_attempt(client, message):
     chat_id = message.chat.id
-    user_id = message.from_user.id
-    guess = message.text  # Directly use the message text
-
-    # Check if a CAPTCHA is active
     if chat_id not in active_captchas:
-        return # No active captcha, ignore
-
-    # Check for timeout
-    time_since_captcha = (datetime.utcnow() - active_captchas[chat_id]["timestamp"]).total_seconds()
-    if time_since_captcha > SOLVE_TIMEOUT:
-        return # Ignore, too late.
-
-
-    # Check if the user has an account
-    user_data = await get_user_data(user_id)
-    if not user_data:
-        await message.reply("❌ Account not found! Use /lstart to register.")
         return
 
-    correct_code = active_captchas[chat_id]["code"]
-    is_full_solve = guess == correct_code
-    is_partial_solve = len(guess) == CAPTCHA_LENGTH-1 and guess == correct_code[1:]
-
-    # Prevent multiple solves by same user.
+    user_id = message.from_user.id
+    code = active_captchas[chat_id]["code"]
+    guess = message.text.strip()
+    
+    # Prevent multiple attempts
     if user_id in active_captchas[chat_id]["solvers"]:
-        return # Already solved, ignore.
+        return
+
     active_captchas[chat_id]["solvers"].append(user_id)
+    
+    # Calculate rewards
+    is_full = guess == code
+    reward, level = await calculate_rewards(user_id, is_full)
+    
+    # Update database
+    await xy.update_one({"user_id": user_id}, {
+        "$inc": {"economy.wallet": reward},
+        "$set": {"last_daily": datetime.utcnow()},
+        "$inc": {"captcha_stats.streak.count": 1 if is_full else -1}
+    })
+    
+    # Achievement checks
+    if await award_achievement(user_id, "first_blood"):
+        await message.reply("🎖 New Achievement: First Blood!")
+    
+    # Response messages
+    if is_full:
+        del active_captchas[chat_id]
+        msg = f"✅ Correct! {reward} coins earned!\n" \
+              f"📈 Level: {level} | 🔥 Streak: {streak}+"
+        if random.random() < 0.1:
+            msg += "\n🎉 Lucky Bonus! +100 coins!"
+            await xy.update_one({"user_id": user_id}, {"$inc": {"economy.wallet": 100}})
+    else:
+        msg = f"❌ Incorrect! Try again!\n" \
+              f"💡 Hint: {code[:len(code)//2]}... ({len(code)-len(code)//2} chars hidden)"
+    
+    await message.reply(msg)
 
+# New Leaderboard Command
+@shivuu.on_message(filters.command("leaderboard"))
+async def show_leaderboard(client, message):
+    leaders = await get_leaderboard()
+    text = "🏆 Top Solvers:\n"
+    for idx, user in enumerate(leaders, 1):
+        text += f"{idx}. User {user['user_id']} - 💰 {user['economy']['wallet']}\n"
+    await message.reply(text)
 
-    if is_full_solve or is_partial_solve:
-        current_streak = await update_streak(user_id, chat_id, True, is_full_solve) # Update and get current.
-        if is_full_solve:
-            reward = FULL_REWARD_AMOUNT + (current_streak * STREAK_BONUS)
-            await xy.update_one({"user_id": user_id}, {"$inc": {"economy.wallet": reward}})
-            await message.reply(f"✅ Correct! {message.from_user.first_name} solved the CAPTCHA and won {reward} Laudacoins! (Streak: {current_streak})")
-            del active_captchas[chat_id] # Remove on full solve.
-
-        elif is_partial_solve:
-            reward = PARTIAL_REWARD_AMOUNT + (current_streak * STREAK_BONUS)
-            await xy.update_one({"user_id": user_id}, {"$inc": {"economy.wallet": reward}})
-            await message.reply(f"☑️ Partially Correct! {message.from_user.first_name} got a partial solve and won {reward} Laudacoins! (Streak maintained: {current_streak})")
-            await update_streak(user_id, chat_id, False, is_full_solve) # is_correct = False, for maintainence.
-
-    else: # Incorrect solve.
-        current_streak = await update_streak(user_id, chat_id, False, is_full_solve) # Break streak.
-        await message.reply("❌ Incorrect. Please try again.")
-        if current_streak > 0: # If user broke the streak.
-          await message.reply(f"💔 Your streak of {current_streak} has been broken!")
+# Level Check Command
+@shivuu.on_message(filters.command("level"))
+async def check_level(client, message):
+    user = await xy.find_one({"user_id": message.from_user.id})
+    level = sum(1 for threshold in LEVEL_THRESHOLDS if user["economy"]["wallet"] >= threshold)
+    await message.reply(f"📊 Your Level: {level}\n💰 Next Level at: {LEVEL_THRESHOLDS[level] if level < len(LEVEL_THRESHOLDS) else 'MAX'} coins")
