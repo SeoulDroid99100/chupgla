@@ -60,7 +60,7 @@ async def main():
     asyncio.create_task(periodic_loan_checks())
     
     # Start the client
-    await client.start()
+    await shivuu.run()
     LOGGER.info("Bot started")
     
     # Keep the client running
