@@ -51,15 +51,11 @@ for module_name in ALL_MODULES:
 def main() -> None:
     """Run bot."""
     # Initialize databases and start periodic tasks
-    initialize_rank_db()
-    initialize_loan_db()
     
     # Start the Telegram bot
     application.run_polling(drop_pending_updates=True)
     
     # Schedule periodic tasks
-    shivuu.loop.create_task(periodic_rank_updates())
-    shivuu.loop.create_task(periodic_loan_checks())
 
 if __name__ == "__main__":
     # Start Flask server in a daemon thread
