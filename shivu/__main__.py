@@ -5,30 +5,21 @@ import re
 import asyncio
 from html import escape
 
-try:
-    import uvloop
-    uvloop.install()
-except ImportError:
-    pass  # Fall back to default asyncio loop
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update
+from telegram.ext import CommandHandler, CallbackContext, MessageHandler, filters
 
-from pyrogram import filters, Client
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-
-from shivu import (
-    collection, top_global_groups_collection, group_user_totals_collection,
-    user_collection, user_totals_collection, shivuu,
-    sudo_users, SUPPORT_CHAT, UPDATE_CHAT, db, LOGGER
-)
+from shivu import collection, top_global_groups_collection, group_user_totals_collection, user_collection, user_totals_collection, shivuu
+from shivu import application, SUPPORT_CHAT, UPDATE_CHAT, db, LOGGER
 from shivu.modules import ALL_MODULES
-from shivu.modules.lrank import periodic_rank_updates, initialize_rank_db
-from shivu.modules.lloan import initialize_loan_db, periodic_loan_checks
+from shivu.modules.lrank import periodic_rank_updates, initialize_rank_db  # Import
+from shivu.modules.lloan import initialize_loan_db, periodic_loan_checks  # Import
 from flask import Flask, jsonify
 import threading
 import nest_asyncio
 
-# Flask setup
 app = Flask(__name__)
-nest_asyncio.apply()
 
 @app.route('/')
 def home():
@@ -41,37 +32,22 @@ def random_number():
 def run_flask():
     app.run(host="0.0.0.0", port=7860)
 
-# Load modules
+nest_asyncio.apply()
+
 for module_name in ALL_MODULES:
-    imported_module = importlib.import_module(f"shivu.modules.{module_name}")
+    imported_module = importlib.import_module("shivu.modules." + module_name)
 
-# Pyrogram startup handler
-@shivuu.on_message(filters.command("sex") & filters.private)
-async def start_command(_, message):
-    await message.reply("Bot is running!")
-
-async def main():
-    # Initialize databases
-    initialize_rank_db()
-    initialize_loan_db()
-    
-    # Start periodic tasks
-    asyncio.create_task(periodic_rank_updates())
-    asyncio.create_task(periodic_loan_checks())
-    
-    # Start the client
-    await shivuu.run()
-    LOGGER.info("Bot started")
-    
-    # Keep the client running
-    await asyncio.Event().wait()
+# Start task
+def main() -> None:
+    """Run bot."""
+    application.run_polling(drop_pending_updates=True)
+    initialize_rank_db()  # Call initialization functions
+    initialize_loan_db()  # Call initialization functions
+    shivuu.loop.create_task(periodic_rank_updates())  # Start the tasks
+    shivuu.loop.create_task(periodic_loan_checks())    # Start the tasks
 
 if __name__ == "__main__":
-    # Start Flask in daemon thread
     threading.Thread(target=run_flask, daemon=True).start()
-    
-    # Run the asyncio event loop
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        LOGGER.info("Bot stopped")
+    shivuu.start()
+    LOGGER.info("Bot started")
+    main()
