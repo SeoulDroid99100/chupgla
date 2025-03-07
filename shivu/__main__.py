@@ -7,7 +7,7 @@ import nest_asyncio
 from html import escape
 
 # Set uvloop as the event loop policy
-nest_asyncio.install()
+nest_asyncio.apply()
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CommandHandler, CallbackContext, MessageHandler, filters
 
