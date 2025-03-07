@@ -3,12 +3,11 @@ import time
 import random
 import re
 import asyncio
-import uvloop
+import nest_asyncio
 from html import escape
 
 # Set uvloop as the event loop policy
-uvloop.install()
-
+nest_asyncio.install()
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CommandHandler, CallbackContext, MessageHandler, filters
 
