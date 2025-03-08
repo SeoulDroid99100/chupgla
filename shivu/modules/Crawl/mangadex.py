@@ -34,7 +34,7 @@ async def d(_,q):
         total=len([x for x in c if x['id']==chid][:50])
         for idx,x in enumerate([x for x in c if x['id']==chid][:50]):
             async with session.get(f"https://uploads.mangadex.org/data/{x['id']}")as r:
-                imgs.append(await asyncio.to_thread(lambda:I.open(B(await r.read()).convert('RGB')))
+                imgs.append(await asyncio.to_thread(lambda:I.open(B(await r.read()).convert('RGB'))))
                 # Progress update every 20%
                 if (pr:=int((idx+1)/total*100))//20 > pr//20:
                     await q.message.edit(f"**📥 Downloading**\n{SYM['d']}\n{SYM['li']} Progress: {pr}%")
