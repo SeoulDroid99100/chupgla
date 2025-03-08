@@ -148,7 +148,7 @@ class MangaDexClient:
                 break
             all_chapters.extend(chapters)
             offset += limit
-            time.sleep(1.5)  # Delay to avoid rate limiting
+            time.sleep(1.5)  # This blocks the thread it's running in, but not the event loop when called via run_in_executor
         
         # Process chapters to remove duplicates
         seen = set()
@@ -284,20 +284,24 @@ async def mangadex_command(client, message: Message):
     if not query:
         return await message.reply(small_caps("provide manga name"), parse_mode=ParseMode.MARKDOWN.value)
 
-    results, total = mdex.search_manga(query)
+    # Run synchronous search_manga in a thread to avoid blocking
+    loop = asyncio.get_running_loop()
+    results, total = await loop.run_in_executor(None, mdex.search_manga, query)
+
     if not results:
         # Improved suggestion mechanism
         words = query.split()[:3]  # Limit to first 3 words
         suggestion_candidates = defaultdict(lambda: {'manga': None, 'freq': 0})
 
         for word in words:
-            word_results, _ = mdex.search_manga(word, limit=10)  # Limit to 10 results per word
+            # Run synchronous search_manga for suggestions in a thread
+            word_results, _ = await loop.run_in_executor(None, mdex.search_manga, word, 0, 10)
             for manga in word_results:
                 manga_id = manga['id']
                 if suggestion_candidates[manga_id]['manga'] is None:
                     suggestion_candidates[manga_id]['manga'] = manga
                 suggestion_candidates[manga_id]['freq'] += 1
-            await asyncio.sleep(0.5)  # Delay to respect rate limits
+            await asyncio.sleep(0.5)  # Non-blocking sleep to respect rate limits
 
         # Compute similarity and rank suggestions
         suggestions = []
@@ -359,7 +363,9 @@ async def handle_search_select(client, callback: CallbackQuery):
     except (IndexError, ValueError):
         await callback.answer("Invalid selection", show_alert=True)
         return
-    chapters = mdex.get_all_chapters(manga['id'])
+    # Run synchronous get_all_chapters in a thread to avoid blocking
+    loop = asyncio.get_running_loop()
+    chapters = await loop.run_in_executor(None, mdex.get_all_chapters, manga['id'])
     if not chapters:
         await callback.answer("No chapters available", show_alert=True)
         return
@@ -481,7 +487,9 @@ async def handle_download(client, callback: CallbackQuery):
                         parse_mode=ParseMode.DISABLED.value
                     )
                     last_reported_progress = int(progress // 20 * 20)
-        pdf_bytes = img2pdf.convert(image_buffers)
+        # Run img2pdf.convert in a thread to avoid blocking
+        loop = asyncio.get_running_loop()
+        pdf_bytes = await loop.run_in_executor(None, img2pdf.convert, image_buffers)
         await callback.message.reply_document(
             document=BytesIO(pdf_bytes),
             file_name=f"{small_caps('chapter')}_{ch_num}.pdf",
