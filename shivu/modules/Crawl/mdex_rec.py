@@ -10,7 +10,7 @@ from pyrogram.enums import ParseMode
 from pyrogram.errors import FloodWait, QueryIdInvalid
 import logging
 from functools import wraps
-
+from shivu import shivuu
 # Configure logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
