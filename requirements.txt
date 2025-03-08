@@ -19,3 +19,4 @@ uvloop
 requests
 fake_useragent
 img2pdf
+aiohttp
