@@ -1,14 +1,4 @@
-=True)
-    finally:
-        if session_id in sessions.chapter_sessions:
-            del sessions.chapter_sessions[session_id]
-
-@shivuu.on_callback_query(filters.regex(r"^chpg:"))
-@error_handler
-async def handle_chapter_pagination(client, callback: CallbackQuery):
-    _, session_id, page = callback.data.split(":")
-    await callback.message.edit_reply_markup(
-        await create_chapter_buttons(sessioimport os
+import os
 import json
 import logging
 import hashlib
