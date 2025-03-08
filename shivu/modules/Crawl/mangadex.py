@@ -34,7 +34,7 @@ class ParseMode(Enum):
 
 SMALL_CAPS_TRANS = str.maketrans(
     'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ',
-    'ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ'
+    'ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴝxʏᴢ'
 )
 
 def small_caps(text: str) -> str:
@@ -185,11 +185,12 @@ class SessionManager:
         }
         return session_id
     
-    def create_chapter_session(self, manga_id: str, chapters: list) -> str:
+    def create_chapter_session(self, manga_id: str, chapters: list, search_session_id: str) -> str:
         session_id = hashlib.md5(f"{manga_id}{datetime.now().timestamp()}".encode()).hexdigest()[:8]
         self.chapter_sessions[session_id] = {
             'manga_id': manga_id,
             'chapters': chapters,
+            'search_session_id': search_session_id,
             'timestamp': datetime.now()
         }
         return session_id
@@ -332,7 +333,7 @@ async def handle_search_select(client, callback: CallbackQuery):
         await callback.answer("No chapters available", show_alert=True)
         return
     
-    ch_session = sessions.create_chapter_session(manga['id'], chapters)
+    ch_session = sessions.create_chapter_session(manga['id'], chapters, session_id)
     
     caption = (
         f"**[{manga['title']}]({manga['cover_url']})**\n"
@@ -356,6 +357,7 @@ async def create_chapter_buttons(session_id: str, page: int = 0) -> InlineKeyboa
         return InlineKeyboardMarkup([])
     
     chapters = session['chapters']
+    search_session_id = session.get('search_session_id', '')
     PAGE_SIZE = 8
     total_pages = (len(chapters) + PAGE_SIZE - 1) // PAGE_SIZE
     
@@ -387,11 +389,29 @@ async def create_chapter_buttons(session_id: str, page: int = 0) -> InlineKeyboa
     buttons.append([
         InlineKeyboardButton(
             "🔙 Back to Results",
-            callback_data=f"back:{session_id}"
+            callback_data=f"back:{search_session_id}"
         )
     ])
     
     return InlineKeyboardMarkup(buttons)
+
+@shivuu.on_callback_query(filters.regex(r"^back:"))
+@error_handler
+async def handle_back_button(client, callback: CallbackQuery):
+    _, search_session_id = callback.data.split(":")
+    session = sessions.search_sessions.get(search_session_id)
+    
+    if not session or datetime.now() - session['timestamp'] > timedelta(minutes=10):
+        await callback.answer("Search session expired", show_alert=True)
+        return
+
+    caption, reply_markup = await generate_search_message(search_session_id)
+    await callback.message.edit_text(
+        text=caption,
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.MARKDOWN.value,
+        disable_web_page_preview=False
+    )
 
 @shivuu.on_callback_query(filters.regex(r"^dl:"))
 @error_handler
@@ -413,6 +433,7 @@ async def handle_download(client, callback: CallbackQuery):
         base_url = data['baseUrl']
         images = data['chapter']['data']
         image_buffers = []
+        last_reported_progress = 0
         
         with ThreadPoolExecutor(max_workers=4) as executor:
             futures = []
@@ -429,12 +450,15 @@ async def handle_download(client, callback: CallbackQuery):
                 img.save(bio, format='JPEG', quality=85)
                 image_buffers.append(bio.getvalue())
                 
-                if idx % 5 == 0 or idx == len(images) - 1:
-                    progress = (idx + 1) / len(images)
+                progress = (idx + 1) / len(images) * 100
+                next_threshold = (last_reported_progress // 20 + 1) * 20
+                
+                if progress >= next_threshold or idx == len(images) - 1:
                     await callback.message.edit_text(
-                        f"Downloading... {int(progress * 100)}%",
+                        f"Downloading... {int(progress)}%",
                         parse_mode=ParseMode.DISABLED.value
                     )
+                    last_reported_progress = int(progress // 20 * 20)
         
         pdf_bytes = img2pdf.convert(image_buffers)
         
@@ -443,6 +467,14 @@ async def handle_download(client, callback: CallbackQuery):
             file_name=f"{small_caps('chapter')}_{ch_num}.pdf",
             parse_mode=ParseMode.DISABLED.value
         )
+        
+        # Return to chapter menu after download completes
+        if session_id in sessions.chapter_sessions:
+            await callback.message.edit_text(
+                text=callback.message.text,  # Keep the current caption
+                reply_markup=await create_chapter_buttons(session_id),
+                parse_mode=ParseMode.DISABLED.value
+            )
         
     except Exception as e:
         logger.error(f"Download failed: {e}")
@@ -458,5 +490,3 @@ async def handle_chapter_pagination(client, callback: CallbackQuery):
     await callback.message.edit_reply_markup(
         await create_chapter_buttons(session_id, int(page))
     )
-
-# Note: The 'back:' callback handler is assumed to exist elsewhere in the codebase.
