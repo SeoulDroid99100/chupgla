@@ -375,5 +375,5 @@ async def handle_download(client, callback: CallbackQuery):
 @error_handler
 async def handle_chapter_pagination(client, callback: CallbackQuery):
     _, session_id, page = callback.data.split(":")
-    await callback.message.edit_reply_markup(
+    await callback.message.edit_reply_markup()
         await create_chapter_buttons(session_id, int(page))
