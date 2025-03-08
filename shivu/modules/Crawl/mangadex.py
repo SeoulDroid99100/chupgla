@@ -1,12 +1,14 @@
 import os
 import json
 import logging
+import asyncio
 from typing import Optional, Tuple, Dict, List
 from datetime import datetime
 from functools import wraps
 from io import BytesIO
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from fake_useragent import UserAgent
 from shivu import shivuu
 from PIL import Image
 import img2pdf
@@ -24,8 +26,8 @@ logger = logging.getLogger(__name__)
 
 # Small caps translation table
 SMALL_CAPS_TRANS = str.maketrans(
-    'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZ',
-    'ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ'
+    'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ',
+    'ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ'
 )
 
 def small_caps(text: str) -> str:
@@ -93,14 +95,15 @@ class MangaDexClient:
             # Process genres safely
             genres = []
             for tag in attrs.get('tags', []):
-                if name := tag.get('attributes', {}).get('name', {}).get('en'):
+                name = tag.get('attributes', {}).get('name', {}).get('en')
+                if name:
                     genres.append(name.capitalize())
 
             return {
                 'title': attrs.get('title', {}).get('en', 'Untitled'),
                 'year': attrs.get('year', 'N/A'),
                 'status': str(attrs.get('status', 'N/A')).capitalize(),
-                'score': round(attrs.get('rating', {}).get('bayesian', 0) * 10),  # Fixed line
+                'score': round(attrs.get('rating', {}).get('bayesian', 0) * 10),
                 'genres': genres[:5],
                 'description': attrs.get('description', {}).get('en', 'No description available'),
                 'cover_url': cover_url
@@ -120,7 +123,7 @@ class MangaDexClient:
             return [
                 {
                     'id': ch['id'],
-                    'chapter': ch['attributes'].get('chapter', 0),
+                    'chapter': ch['attributes'].get('chapter', '0'),
                     'hash': ch['attributes'].get('hash', '')
                 }
                 for ch in data.get('data', [])
@@ -129,6 +132,36 @@ class MangaDexClient:
         except Exception as e:
             logger.error(f"Chapter fetch failed: {str(e)}")
             return []
+
+    def _download_image(self, url: str, index: int, ch_id: str, message: Message) -> Optional[BytesIO]:
+        try:
+            response = self.session.get(url)
+            response.raise_for_status()
+            
+            img = Image.open(BytesIO(response.content))
+            if img.mode in ('RGBA', 'LA'):
+                img = img.convert('RGB')
+            
+            img_bytes = BytesIO()
+            img.save(img_bytes, format='JPEG')
+            img_bytes.seek(0)
+            
+            download_tracker[ch_id]['images'][index] = img_bytes
+            
+            progress = (index + 1) / download_tracker[ch_id]['total']
+            filled = int(progress * 10)
+            progress_bar = f"{self.SYMBOLS['progress']*filled}{self.SYMBOLS['inactive']*(10-filled)}"
+            
+            loop = asyncio.get_event_loop()
+            coro = message.edit_text(
+                f"`{progress_bar} {small_caps('downloading')} {index+1}/{download_tracker[ch_id]['total']}`"
+            )
+            loop.run_until_complete(coro)
+            
+            return img_bytes
+        except Exception as e:
+            logger.warning(f"Failed to download image {index}: {str(e)}")
+            return None
 
 mdex = MangaDexClient()
 chapter_store = defaultdict(list)
@@ -158,23 +191,20 @@ async def mangadex_command(client, message: Message):
     if not manga_info or not manga_id:
         return await message.reply(small_caps("manhwa not found"))
 
-    # Format response with symbols
     response = [
         f"{mdex.SYMBOLS['title']} **{manga_info['title']}**",
         f"{mdex.SYMBOLS['list_item']} {small_caps('start date')} {mdex.SYMBOLS['arrow']} {manga_info['year']}",
         f"{mdex.SYMBOLS['list_item']} {small_caps('status')} {mdex.SYMBOLS['arrow']} {manga_info['status']}",
         f"{mdex.SYMBOLS['list_item']} {small_caps('score')} {mdex.SYMBOLS['arrow']} {manga_info['score']}",
-        f"{mdex.SYMBOLS['list_item']} {small_caps('genres')} {mdex.SYMBOLS['arrow']} {', '.join(manga_info['genres']}",
+        f"{mdex.SYMBOLS['list_item']} {small_caps('genres')} {mdex.SYMBOLS['arrow']} {', '.join(manga_info['genres'])}",
         mdex.SYMBOLS['divider'],
         manga_info['description'],
         mdex.SYMBOLS['divider']
     ]
 
-    # Store chapters
     chapters = mdex.get_chapters(manga_id)
     chapter_store[manga_id] = chapters
 
-    # Create keyboard with small caps
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton(
             f"{small_caps('access chapters')} ➫",
@@ -208,7 +238,6 @@ async def handle_nav(client, callback: CallbackQuery):
             callback_data=f"dl:{manga_id}:{ch['id']}:{ch['chapter']}"
         )])
     
-    # Navigation controls
     nav_buttons = []
     if page > 0:
         nav_buttons.append(InlineKeyboardButton(
@@ -245,14 +274,12 @@ async def handle_download(client, callback: CallbackQuery):
     _, manga_id, ch_id, ch_num = callback.data.split(":")
     
     try:
-        # Fetch chapter data
         response = mdex.session.get(f"{mdex.BASE_URL}/at-home/server/{ch_id}")
         data = mdex._handle_response(response)
         
-        if not data:
+        if not data or 'chapter' not in data:
             raise ValueError("Invalid chapter data")
         
-        # Download images
         base_url = data['baseUrl']
         images = data['chapter']['data']
         total_images = len(images)
@@ -263,26 +290,23 @@ async def handle_download(client, callback: CallbackQuery):
             'images': {}
         }
         
-        # Download with progress updates
         with ThreadPoolExecutor(max_workers=4) as executor:
             futures = []
             for idx, filename in enumerate(images):
                 url = f"{base_url}/data/{data['chapter']['hash']}/{filename}"
                 futures.append(executor.submit(
-                    self._download_image,
+                    mdex._download_image,
                     url, idx, ch_id, callback.message
                 ))
             
             for future in futures:
-                await future
+                future.result()
         
-        # Create PDF
-        images = [download_tracker[ch_id]['images'][k] for k in sorted(download_tracker[ch_id]['images'])]
-        pdf_bytes = img2pdf.convert([img.tobytes() for img in images])
+        sorted_images = [download_tracker[ch_id]['images'][k] for k in sorted(download_tracker[ch_id]['images'])]
+        pdf_bytes = img2pdf.convert(sorted_images)
         
-        # Send PDF
         await callback.message.reply_document(
-            document=pdf_bytes,
+            document=BytesIO(pdf_bytes),
             file_name=f"{small_caps('chapter')}_{ch_num}.pdf"
         )
         
@@ -292,25 +316,3 @@ async def handle_download(client, callback: CallbackQuery):
     finally:
         if ch_id in download_tracker:
             del download_tracker[ch_id]
-
-async def _download_image(self, url: str, index: int, ch_id: str, message: Message):
-    try:
-        response = self.session.get(url)
-        response.raise_for_status()
-        
-        img = Image.open(BytesIO(response.content))
-        download_tracker[ch_id]['images'][index] = img
-        
-        # Update progress
-        progress = (index + 1) / download_tracker[ch_id]['total']
-        filled = int(progress * 10)
-        progress_bar = f"{self.SYMBOLS['progress']*filled}{self.SYMBOLS['inactive']*(10-filled)}"
-        
-        await message.edit_text(
-            f"`{progress_bar} {small_caps('downloading')} {index+1}/{download_tracker[ch_id]['total']}`"
-        )
-        
-        return img
-    except Exception as e:
-        logger.warning(f"Failed to download image {index}: {str(e)}")
-        return None
