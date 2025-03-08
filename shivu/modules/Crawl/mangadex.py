@@ -20,6 +20,8 @@ from requests.exceptions import RequestException
 from pyrogram import filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, Message
 from pyrogram.errors import FloodWait, QueryIdInvalid
+from difflib import SequenceMatcher
+
 # Configure logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -77,13 +79,13 @@ class MangaDexClient:
             logger.error(f"Response error: {e}")
             return {}
 
-    def search_manga(self, query: str, offset: int = 0) -> Tuple[List[Dict], int]:
+    def search_manga(self, query: str, offset: int = 0, limit: int = 5) -> Tuple[List[Dict], int]:
         try:
             response = self.session.get(
                 f"{self.BASE_URL}/manga",
                 params={
                     "title": query,
-                    "limit": 5,
+                    "limit": limit,
                     "offset": offset,
                     "includes[]": ["cover_art"],
                     "contentRating[]": ["safe", "suggestive", "erotica", "pornographic"],
@@ -284,49 +286,59 @@ async def mangadex_command(client, message: Message):
 
     results, total = mdex.search_manga(query)
     if not results:
-        # Try broader search for suggestions
-        query_words = query.split()
-        if query_words:
-            broad_query = query_words[0]
-            suggestions, _ = mdex.search_manga(broad_query)
-            if suggestions:
-                caption = "**Did you mean...**\n"
-                buttons = []
-                for idx, sug in enumerate(suggestions[:5]):
-                    caption += f"{idx+1}. {sug['title']}\n"
-                    buttons.append([InlineKeyboardButton(
-                        f"{idx+1}. {sug['title'][:25]}",
-                        callback_data=f"sugg:{broad_query}:{idx}"
-                    )])
-                await message.reply(
-                    text=caption,
-                    reply_markup=InlineKeyboardMarkup(buttons)
-                )
-                return
-        await message.reply(small_caps("no results found"), parse_mode=ParseMode.MARKDOWN.value)
-        return
+        # Improved suggestion mechanism
+        words = query.split()[:3]  # Limit to first 3 words
+        suggestion_candidates = defaultdict(lambda: {'manga': None, 'freq': 0})
 
+        for word in words:
+            word_results, _ = mdex.search_manga(word, limit=10)  # Limit to 10 results per word
+            for manga in word_results:
+                manga_id = manga['id']
+                if suggestion_candidates[manga_id]['manga'] is None:
+                    suggestion_candidates[manga_id]['manga'] = manga
+                suggestion_candidates[manga_id]['freq'] += 1
+            await asyncio.sleep(0.5)  # Delay to respect rate limits
+
+        # Compute similarity and rank suggestions
+        suggestions = []
+        for candidate in suggestion_candidates.values():
+            manga = candidate['manga']
+            title = manga['title'].lower()
+            similarity = SequenceMatcher(None, query.lower(), title).ratio()
+            suggestions.append((manga, similarity, candidate['freq']))
+
+        # Sort by similarity (primary) and frequency (secondary), descending
+        suggestions.sort(key=lambda x: (x[1], x[2]), reverse=True)
+        top_suggestions = suggestions[:5]  # Take top 5
+
+        if top_suggestions:
+            caption = "**Did you mean...**\n"
+            buttons = []
+            # Create a temporary session with the suggested mangas
+            temp_session_id = sessions.create_search_session(
+                [s[0] for s in top_suggestions], len(top_suggestions), query, 0
+            )
+            for idx, (manga, sim, freq) in enumerate(top_suggestions):
+                caption += f"{idx+1}. {manga['title']} (Similarity: {int(sim*100)}%)\n"
+                buttons.append([InlineKeyboardButton(
+                    f"{idx+1}. {manga['title'][:25]}",
+                    callback_data=f"srch:{temp_session_id}:{idx}"
+                )])
+            await message.reply(
+                text=caption,
+                reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode=ParseMode.MARKDOWN.value,
+                disable_web_page_preview=False
+            )
+            return
+        else:
+            await message.reply(small_caps("no results found"), parse_mode=ParseMode.MARKDOWN.value)
+            return
+
+    # Existing logic for when results are found
     session_id = sessions.create_search_session(results, total, query, 0)
     caption, reply_markup = await generate_search_message(session_id)
     await message.reply(
-        text=caption,
-        reply_markup=reply_markup,
-        parse_mode=ParseMode.MARKDOWN.value,
-        disable_web_page_preview=False
-    )
-
-# Handle suggestion selection
-@shivuu.on_callback_query(filters.regex(r"^sugg:"))
-@error_handler
-async def handle_suggestion_select(client, callback: CallbackQuery):
-    _, query, idx = callback.data.split(":")
-    results, total = mdex.search_manga(query)
-    if not results:
-        await callback.answer("No results found for suggestion", show_alert=True)
-        return
-    session_id = sessions.create_search_session(results, total, query, 0)
-    caption, reply_markup = await generate_search_message(session_id)
-    await callback.message.edit_text(
         text=caption,
         reply_markup=reply_markup,
         parse_mode=ParseMode.MARKDOWN.value,
