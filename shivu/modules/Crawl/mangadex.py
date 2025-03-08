@@ -24,8 +24,8 @@ logger = logging.getLogger(__name__)
 
 # Small caps translation table
 SMALL_CAPS_TRANS = str.maketrans(
-    'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ',
-    'ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ'
+    'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZ',
+    'ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ'
 )
 
 def small_caps(text: str) -> str:
@@ -100,7 +100,7 @@ class MangaDexClient:
                 'title': attrs.get('title', {}).get('en', 'Untitled'),
                 'year': attrs.get('year', 'N/A'),
                 'status': str(attrs.get('status', 'N/A')).capitalize(),
-                'score': round(attrs.get('rating', {}).get('bayesian', 0) * 10,
+                'score': round(attrs.get('rating', {}).get('bayesian', 0) * 10),  # Fixed line
                 'genres': genres[:5],
                 'description': attrs.get('description', {}).get('en', 'No description available'),
                 'cover_url': cover_url
@@ -202,7 +202,7 @@ async def handle_nav(client, callback: CallbackQuery):
     
     buttons = []
     for ch in chapters[start:end]:
-        btn_text = f"▷ {small_caps(f'chapter {ch['chapter']}')}"
+        btn_text = f"◁ {small_caps(f'chapter {ch['chapter']}')}"
         buttons.append([InlineKeyboardButton(
             btn_text,
             callback_data=f"dl:{manga_id}:{ch['id']}:{ch['chapter']}"
