@@ -3,14 +3,14 @@ import json
 import logging
 import hashlib
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta  # Added timedelta
 from enum import Enum
 from typing import Optional, Tuple, Dict, List
 from functools import wraps
 from io import BytesIO
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from fake_useragent import UserAgent
+from fake_useragent import UserAgent  # Ensure this package is installed
 from shivu import shivuu
 from PIL import Image
 import img2pdf
@@ -61,7 +61,8 @@ class MangaDexClient:
     def _generate_user_agent(self) -> str:
         try:
             return UserAgent().random
-        except:
+        except Exception as e:
+            logger.warning(f"UserAgent failed: {e}")
             return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
     def _handle_response(self, response: requests.Response) -> dict:
@@ -69,7 +70,7 @@ class MangaDexClient:
             response.raise_for_status()
             return response.json()
         except (json.JSONDecodeError, requests.HTTPError) as e:
-            logger.error(f"Response error: {str(e)}")
+            logger.error(f"Response error: {e}")
             return {}
 
     def search_manga(self, query: str, offset: int = 0) -> Tuple[List[dict], int]:
@@ -93,10 +94,9 @@ class MangaDexClient:
                 relationships = manga.get('relationships', [])
                 
                 cover_art = next(
-                    (r for r in relationships if r.get('type') == 'cover_art'),
-                    {}
+                    (r for r in relationships if r.get('type') == 'cover_art'), None
                 )
-                cover_file = cover_art.get('attributes', {}).get('fileName', '')
+                cover_file = cover_art.get('attributes', {}).get('fileName', '') if cover_art else ''
                 cover_url = f"https://uploads.mangadex.org/covers/{manga['id']}/{cover_file}" if cover_file else ''
                 
                 results.append({
@@ -112,12 +112,13 @@ class MangaDexClient:
             
             return results, data.get('total', 0)
         except Exception as e:
-            logger.error(f"Search failed: {str(e)}")
+            logger.error(f"Search failed: {e}")
             return [], 0
 
     def _truncate_description(self, text: str) -> str:
-        truncated = text[:350].rsplit(' ', 1)[0]
-        return f"{truncated}... [Read More](https://mangadex.org)" if len(text) > 350 else text
+        if len(text) <= 350:
+            return text
+        return text[:347].rsplit(' ', 1)[0] + "..."
 
     def get_chapters(self, manga_id: str) -> List[dict]:
         try:
@@ -135,36 +136,42 @@ class MangaDexClient:
             
             chapters = []
             for ch in data.get('data', []):
-                if ch['type'] != 'chapter':
+                if ch.get('type') != 'chapter':
                     continue
                 
                 attributes = ch.get('attributes', {})
                 relationships = ch.get('relationships', [])
                 
                 group = next(
-                    (r for r in relationships if r.get('type') == 'scanlation_group'),
-                    {}
+                    (r for r in relationships if r.get('type') == 'scanlation_group'), None
                 )
+                group_name = group.get('attributes', {}).get('name', 'Unknown') if group else 'Unknown'
+                
                 chapters.append({
                     'id': ch['id'],
-                    'chapter': attributes.get('chapter', 'Oneshot'),
+                    'chapter': str(attributes.get('chapter', 'Oneshot')),
                     'title': attributes.get('title', ''),
-                    'group': group.get('attributes', {}).get('name', 'Unknown'),
+                    'group': group_name,
                     'hash': attributes.get('hash', '')
                 })
             
             seen = set()
-            return [ch for ch in reversed(chapters) 
-                   if not (idn := f"{ch['chapter']}-{ch['group']}") in seen 
-                   and not seen.add(idn)][::-1]
+            unique_chapters = []
+            for ch in reversed(chapters):
+                identifier = f"{ch['chapter']}-{ch['group']}"
+                if identifier not in seen:
+                    seen.add(identifier)
+                    unique_chapters.append(ch)
+            
+            return unique_chapters[::-1]
         except Exception as e:
-            logger.error(f"Chapter fetch failed: {str(e)}")
+            logger.error(f"Chapter fetch failed: {e}")
             return []
 
 class SessionManager:
     def __init__(self):
-        self.search_sessions = defaultdict(dict)
-        self.chapter_sessions = defaultdict(dict)
+        self.search_sessions = {}
+        self.chapter_sessions = {}
     
     def create_search_session(self, results: list, total: int, query: str) -> str:
         session_id = hashlib.md5(f"{datetime.now().timestamp()}".encode()).hexdigest()[:8]
@@ -194,7 +201,7 @@ def error_handler(func):
         try:
             return await func(client, update, *args, **kwargs)
         except Exception as e:
-            logger.error(f"Error in {func.__name__}: {str(e)}")
+            logger.error(f"Error in {func.__name__}: {e}", exc_info=True)
             if isinstance(update, Message):
                 await update.reply(small_caps("operation failed: internal error"), parse_mode=ParseMode.MARKDOWN.value)
             elif isinstance(update, CallbackQuery):
@@ -339,19 +346,22 @@ async def handle_download(client, callback: CallbackQuery):
         
         base_url = data['baseUrl']
         images = data['chapter']['data']
-        image_data = []
+        image_buffers = []
         
         with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = [executor.submit(
-                lambda url: Image.open(BytesIO(requests.get(url).content)).convert('RGB'),
-                f"{base_url}/data/{data['chapter']['hash']}/{filename}"
-            ) for filename in images]
+            futures = []
+            for filename in images:
+                url = f"{base_url}/data/{data['chapter']['hash']}/{filename}"
+                futures.append(executor.submit(
+                    lambda u: Image.open(BytesIO(requests.get(u).content).convert('RGB'),
+                    url
+                ))
             
             for idx, future in enumerate(futures):
                 img = future.result()
                 bio = BytesIO()
-                img.save(bio, format='JPEG')
-                image_data.append(bio.getvalue())
+                img.save(bio, format='JPEG', quality=85)
+                image_buffers.append(bio.getvalue())
                 
                 progress = (idx+1)/len(images)
                 await callback.message.edit_text(
@@ -359,7 +369,7 @@ async def handle_download(client, callback: CallbackQuery):
                     parse_mode=ParseMode.DISABLED.value
                 )
         
-        pdf_bytes = img2pdf.convert(image_data)
+        pdf_bytes = img2pdf.convert(image_buffers)
         
         await callback.message.reply_document(
             document=BytesIO(pdf_bytes),
@@ -368,12 +378,16 @@ async def handle_download(client, callback: CallbackQuery):
         )
         
     except Exception as e:
-        logger.error(f"Download failed: {str(e)}")
+        logger.error(f"Download failed: {e}")
         await callback.answer("Download failed", show_alert=True)
+    finally:
+        if session_id in sessions.chapter_sessions:
+            del sessions.chapter_sessions[session_id]
 
 @shivuu.on_callback_query(filters.regex(r"^chpg:"))
 @error_handler
 async def handle_chapter_pagination(client, callback: CallbackQuery):
     _, session_id, page = callback.data.split(":")
-    await callback.message.edit_reply_markup()
+    await callback.message.edit_reply_markup(
         await create_chapter_buttons(session_id, int(page))
+    )
