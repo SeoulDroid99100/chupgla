@@ -1,4 +1,14 @@
-import os
+=True)
+    finally:
+        if session_id in sessions.chapter_sessions:
+            del sessions.chapter_sessions[session_id]
+
+@shivuu.on_callback_query(filters.regex(r"^chpg:"))
+@error_handler
+async def handle_chapter_pagination(client, callback: CallbackQuery):
+    _, session_id, page = callback.data.split(":")
+    await callback.message.edit_reply_markup(
+        await create_chapter_buttons(sessioimport os
 import json
 import logging
 import hashlib
@@ -11,7 +21,7 @@ from io import BytesIO
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from fake_useragent import UserAgent
-from shivu import shivuu
+from shivu import shivuu  # Replace with your Pyrogram Client instance
 from PIL import Image
 import img2pdf
 import requests
@@ -27,19 +37,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Define ParseMode enum for Pyrogram
 class ParseMode(Enum):
     MARKDOWN = enums.ParseMode.MARKDOWN
     HTML = enums.ParseMode.HTML
     DISABLED = enums.ParseMode.DISABLED
 
+# Small caps text converter
 SMALL_CAPS_TRANS = str.maketrans(
     'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ',
-    'ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴝxʏᴢ'
+    'ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ'
 )
 
 def small_caps(text: str) -> str:
     return text.translate(SMALL_CAPS_TRANS)
 
+# MangaDex API Client
 class MangaDexClient:
     BASE_URL = "https://api.mangadex.org"
     SYMBOLS = {
@@ -74,7 +87,7 @@ class MangaDexClient:
             logger.error(f"Response error: {e}")
             return {}
 
-    def search_manga(self, query: str, offset: int = 0) -> Tuple[List[dict], int]:
+    def search_manga(self, query: str, offset: int = 0) -> Tuple[List[Dict], int]:
         try:
             response = self.session.get(
                 f"{self.BASE_URL}/manga",
@@ -121,60 +134,60 @@ class MangaDexClient:
             return text
         return text[:347].rsplit(' ', 1)[0] + "..."
 
-    def get_chapters(self, manga_id: str) -> List[dict]:
-        try:
+    def get_all_chapters(self, manga_id: str) -> List[Dict]:
+        all_chapters = []
+        offset = 0
+        limit = 100
+        while True:
             response = self.session.get(
                 f"{self.BASE_URL}/manga/{manga_id}/feed",
                 params={
                     "translatedLanguage[]": "en",
                     "order[chapter]": "asc",
                     "includes[]": ["scanlation_group"],
-                    "limit": 100,
+                    "limit": limit,
+                    "offset": offset,
                     "contentRating[]": ["safe", "suggestive", "erotica", "pornographic"]
                 }
             )
             data = self._handle_response(response)
-            
-            chapters = []
-            for ch in data.get('data', []):
-                if ch.get('type') != 'chapter':
-                    continue
-                
-                attributes = ch.get('attributes', {})
-                relationships = ch.get('relationships', [])
-                
-                group = next(
-                    (r for r in relationships if r.get('type') == 'scanlation_group'), None
-                )
-                group_name = group.get('attributes', {}).get('name', 'Unknown') if group else 'Unknown'
-                
-                chapters.append({
-                    'id': ch['id'],
-                    'chapter': str(attributes.get('chapter', 'Oneshot')),
-                    'title': attributes.get('title', ''),
-                    'group': group_name,
-                    'hash': attributes.get('hash', '')
-                })
-            
-            seen = set()
-            unique_chapters = []
-            for ch in reversed(chapters):
-                identifier = f"{ch['chapter']}-{ch['group']}"
-                if identifier not in seen:
-                    seen.add(identifier)
-                    unique_chapters.append(ch)
-            
-            return unique_chapters[::-1]
-        except Exception as e:
-            logger.error(f"Chapter fetch failed: {e}")
-            return []
+            chapters = data.get('data', [])
+            if not chapters:
+                break
+            all_chapters.extend(chapters)
+            offset += limit
+            time.sleep(1.5)  # Delay to avoid rate limiting
+        
+        # Process chapters to remove duplicates
+        seen = set()
+        unique_chapters = []
+        for ch in all_chapters:
+            attributes = ch.get('attributes', {})
+            relationships = ch.get('relationships', [])
+            group = next(
+                (r for r in relationships if r.get('type') == 'scanlation_group'), None
+            )
+            group_name = group.get('attributes', {}).get('name', 'Unknown') if group else 'Unknown'
+            chapter_data = {
+                'id': ch['id'],
+                'chapter': str(attributes.get('chapter', 'Oneshot')),
+                'title': attributes.get('title', ''),
+                'group': group_name
+            }
+            identifier = f"{chapter_data['chapter']}-{chapter_data['group']}"
+            if identifier not in seen:
+                seen.add(identifier)
+                unique_chapters.append(chapter_data)
+        
+        return unique_chapters
 
+# Session Management
 class SessionManager:
     def __init__(self):
         self.search_sessions = {}
         self.chapter_sessions = {}
-    
-    def create_search_session(self, results: list, total: int, query: str, offset: int = 0) -> str:
+
+    def create_search_session(self, results: List[Dict], total: int, query: str, offset: int = 0) -> str:
         session_id = hashlib.md5(f"{datetime.now().timestamp()}".encode()).hexdigest()[:8]
         self.search_sessions[session_id] = {
             'results': results,
@@ -184,8 +197,8 @@ class SessionManager:
             'timestamp': datetime.now()
         }
         return session_id
-    
-    def create_chapter_session(self, manga_id: str, chapters: list, search_session_id: str) -> str:
+
+    def create_chapter_session(self, manga_id: str, chapters: List[Dict], search_session_id: str) -> str:
         session_id = hashlib.md5(f"{manga_id}{datetime.now().timestamp()}".encode()).hexdigest()[:8]
         self.chapter_sessions[session_id] = {
             'manga_id': manga_id,
@@ -195,9 +208,23 @@ class SessionManager:
         }
         return session_id
 
+    def get_search_session(self, session_id: str) -> Optional[Dict]:
+        session = self.search_sessions.get(session_id)
+        if session and datetime.now() - session['timestamp'] < timedelta(hours=1):
+            return session
+        return None
+
+    def get_chapter_session(self, session_id: str) -> Optional[Dict]:
+        session = self.chapter_sessions.get(session_id)
+        if session and datetime.now() - session['timestamp'] < timedelta(hours=1):
+            return session
+        return None
+
+# Initialize clients
 mdex = MangaDexClient()
 sessions = SessionManager()
 
+# Error handling decorator
 def error_handler(func):
     @wraps(func)
     async def wrapper(client, update, *args, **kwargs):
@@ -220,8 +247,9 @@ def error_handler(func):
                     pass
     return wrapper
 
+# Generate search results message
 async def generate_search_message(session_id: str) -> Tuple[str, InlineKeyboardMarkup]:
-    session = sessions.search_sessions.get(session_id)
+    session = sessions.get_search_session(session_id)
     if not session:
         return "", InlineKeyboardMarkup([])
 
@@ -245,17 +273,18 @@ async def generate_search_message(session_id: str) -> Tuple[str, InlineKeyboardM
         pagination_buttons.append(InlineKeyboardButton(
             mdex.SYMBOLS['back'], callback_data=f"pg:{session_id}:prev"
         ))
-    
+
     if (current_offset + 5) < total:
         pagination_buttons.append(InlineKeyboardButton(
             mdex.SYMBOLS['page'], callback_data=f"pg:{session_id}:next"
         ))
-    
+
     if pagination_buttons:
         buttons.append(pagination_buttons)
 
     return caption[:1024], InlineKeyboardMarkup(buttons)
 
+# Command to search manga
 @shivuu.on_message(filters.command("mangadex"))
 @error_handler
 async def mangadex_command(client, message: Message):
@@ -265,7 +294,27 @@ async def mangadex_command(client, message: Message):
 
     results, total = mdex.search_manga(query)
     if not results:
-        return await message.reply(small_caps("no results found"), parse_mode=ParseMode.MARKDOWN.value)
+        # Try broader search for suggestions
+        query_words = query.split()
+        if query_words:
+            broad_query = query_words[0]
+            suggestions, _ = mdex.search_manga(broad_query)
+            if suggestions:
+                caption = "**Did you mean...**\n"
+                buttons = []
+                for idx, sug in enumerate(suggestions[:5]):
+                    caption += f"{idx+1}. {sug['title']}\n"
+                    buttons.append([InlineKeyboardButton(
+                        f"{idx+1}. {sug['title'][:25]}",
+                        callback_data=f"sugg:{broad_query}:{idx}"
+                    )])
+                await message.reply(
+                    text=caption,
+                    reply_markup=InlineKeyboardMarkup(buttons)
+                )
+                return
+        await message.reply(small_caps("no results found"), parse_mode=ParseMode.MARKDOWN.value)
+        return
 
     session_id = sessions.create_search_session(results, total, query, 0)
     caption, reply_markup = await generate_search_message(session_id)
@@ -276,34 +325,16 @@ async def mangadex_command(client, message: Message):
         disable_web_page_preview=False
     )
 
-@shivuu.on_callback_query(filters.regex(r"^pg:"))
+# Handle suggestion selection
+@shivuu.on_callback_query(filters.regex(r"^sugg:"))
 @error_handler
-async def handle_search_pagination(client, callback: CallbackQuery):
-    _, session_id, action = callback.data.split(":")
-    session = sessions.search_sessions.get(session_id)
-    
-    if not session or datetime.now() - session['timestamp'] > timedelta(minutes=10):
-        await callback.answer("Session expired", show_alert=True)
-        return
-
-    new_offset = session['offset']
-    if action == "next":
-        new_offset += 5
-    elif action == "prev":
-        new_offset = max(0, new_offset - 5)
-
-    # Fetch new results with updated offset
-    results, total = mdex.search_manga(session['query'], new_offset)
+async def handle_suggestion_select(client, callback: CallbackQuery):
+    _, query, idx = callback.data.split(":")
+    results, total = mdex.search_manga(query)
     if not results:
-        await callback.answer("No more results", show_alert=True)
+        await callback.answer("No results found for suggestion", show_alert=True)
         return
-
-    # Update session with new results and offset
-    session['results'] = results
-    session['offset'] = new_offset
-    session['timestamp'] = datetime.now()
-
-    # Edit message with new caption and buttons
+    session_id = sessions.create_search_session(results, total, query, 0)
     caption, reply_markup = await generate_search_message(session_id)
     await callback.message.edit_text(
         text=caption,
@@ -312,29 +343,25 @@ async def handle_search_pagination(client, callback: CallbackQuery):
         disable_web_page_preview=False
     )
 
+# Handle manga selection from search results
 @shivuu.on_callback_query(filters.regex(r"^srch:"))
 @error_handler
 async def handle_search_select(client, callback: CallbackQuery):
     _, session_id, idx = callback.data.split(":")
-    session = sessions.search_sessions.get(session_id)
-    
-    if not session or datetime.now() - session['timestamp'] > timedelta(minutes=10):
+    session = sessions.get_search_session(session_id)
+    if not session:
         await callback.answer("Session expired", show_alert=True)
         return
-    
     try:
         manga = session['results'][int(idx)]
     except (IndexError, ValueError):
         await callback.answer("Invalid selection", show_alert=True)
         return
-    
-    chapters = mdex.get_chapters(manga['id'])
+    chapters = mdex.get_all_chapters(manga['id'])
     if not chapters:
         await callback.answer("No chapters available", show_alert=True)
         return
-    
     ch_session = sessions.create_chapter_session(manga['id'], chapters, session_id)
-    
     caption = (
         f"**[{manga['title']}]({manga['cover_url']})**\n"
         f"{mdex.SYMBOLS['divider']}\n"
@@ -343,7 +370,6 @@ async def handle_search_select(client, callback: CallbackQuery):
         f"{mdex.SYMBOLS['divider']}\n"
         f"{manga['description']}"
     )
-    
     await callback.message.edit_text(
         text=caption[:1024],
         reply_markup=await create_chapter_buttons(ch_session),
@@ -351,60 +377,61 @@ async def handle_search_select(client, callback: CallbackQuery):
         disable_web_page_preview=False
     )
 
+# Generate chapter selection buttons
 async def create_chapter_buttons(session_id: str, page: int = 0) -> InlineKeyboardMarkup:
-    session = sessions.chapter_sessions.get(session_id)
+    session = sessions.get_chapter_session(session_id)
     if not session:
         return InlineKeyboardMarkup([])
-    
     chapters = session['chapters']
-    search_session_id = session.get('search_session_id', '')
+    search_session_id = session['search_session_id']
     PAGE_SIZE = 8
     total_pages = (len(chapters) + PAGE_SIZE - 1) // PAGE_SIZE
-    
     buttons = []
     for ch in chapters[page*PAGE_SIZE : (page+1)*PAGE_SIZE]:
         btn_text = f"Ch. {ch['chapter']} | {ch['group'][:10]}"
         buttons.append([InlineKeyboardButton(
             btn_text, callback_data=f"dl:{session_id}:{ch['id']}:{ch['chapter']}"
         )])
-    
     nav_buttons = []
     if page > 0:
         nav_buttons.append(InlineKeyboardButton(
             mdex.SYMBOLS['back'], callback_data=f"chpg:{session_id}:{page-1}"
         ))
-    
     nav_buttons.append(InlineKeyboardButton(
         f"{page+1}/{total_pages}", callback_data="noop"
     ))
-    
     if (page+1)*PAGE_SIZE < len(chapters):
         nav_buttons.append(InlineKeyboardButton(
             mdex.SYMBOLS['page'], callback_data=f"chpg:{session_id}:{page+1}"
         ))
-    
     if nav_buttons:
         buttons.append(nav_buttons)
-    
     buttons.append([
         InlineKeyboardButton(
             "🔙 Back to Results",
             callback_data=f"back:{search_session_id}"
         )
     ])
-    
     return InlineKeyboardMarkup(buttons)
 
+# Handle chapter pagination
+@shivuu.on_callback_query(filters.regex(r"^chpg:"))
+@error_handler
+async def handle_chapter_pagination(client, callback: CallbackQuery):
+    _, session_id, page = callback.data.split(":")
+    await callback.message.edit_reply_markup(
+        await create_chapter_buttons(session_id, int(page))
+    )
+
+# Handle back to search results
 @shivuu.on_callback_query(filters.regex(r"^back:"))
 @error_handler
 async def handle_back_button(client, callback: CallbackQuery):
     _, search_session_id = callback.data.split(":")
-    session = sessions.search_sessions.get(search_session_id)
-    
-    if not session or datetime.now() - session['timestamp'] > timedelta(minutes=10):
+    session = sessions.get_search_session(search_session_id)
+    if not session:
         await callback.answer("Search session expired", show_alert=True)
         return
-
     caption, reply_markup = await generate_search_message(search_session_id)
     await callback.message.edit_text(
         text=caption,
@@ -413,28 +440,24 @@ async def handle_back_button(client, callback: CallbackQuery):
         disable_web_page_preview=False
     )
 
+# Handle chapter download
 @shivuu.on_callback_query(filters.regex(r"^dl:"))
 @error_handler
 async def handle_download(client, callback: CallbackQuery):
     _, session_id, ch_id, ch_num = callback.data.split(":")
-    session = sessions.chapter_sessions.get(session_id)
-    
-    if not session or datetime.now() - session['timestamp'] > timedelta(minutes=10):
+    session = sessions.get_chapter_session(session_id)
+    if not session:
         await callback.answer("Session expired", show_alert=True)
         return
-    
     try:
         response = mdex.session.get(f"{mdex.BASE_URL}/at-home/server/{ch_id}")
         data = mdex._handle_response(response)
-        
         if not data or 'chapter' not in data:
             raise ValueError("Invalid chapter data")
-        
         base_url = data['baseUrl']
         images = data['chapter']['data']
         image_buffers = []
         last_reported_progress = 0
-        
         with ThreadPoolExecutor(max_workers=4) as executor:
             futures = []
             for filename in images:
@@ -443,50 +466,35 @@ async def handle_download(client, callback: CallbackQuery):
                     lambda u: Image.open(BytesIO(requests.get(u).content)).convert('RGB'),
                     url
                 ))
-            
             for idx, future in enumerate(futures):
                 img = future.result()
                 bio = BytesIO()
                 img.save(bio, format='JPEG', quality=85)
                 image_buffers.append(bio.getvalue())
-                
                 progress = (idx + 1) / len(images) * 100
                 next_threshold = (last_reported_progress // 20 + 1) * 20
-                
                 if progress >= next_threshold or idx == len(images) - 1:
                     await callback.message.edit_text(
                         f"Downloading... {int(progress)}%",
                         parse_mode=ParseMode.DISABLED.value
                     )
                     last_reported_progress = int(progress // 20 * 20)
-        
         pdf_bytes = img2pdf.convert(image_buffers)
-        
         await callback.message.reply_document(
             document=BytesIO(pdf_bytes),
             file_name=f"{small_caps('chapter')}_{ch_num}.pdf",
             parse_mode=ParseMode.DISABLED.value
         )
-        
-        # Return to chapter menu after download completes
+        # Return to chapter menu
         if session_id in sessions.chapter_sessions:
             await callback.message.edit_text(
-                text=callback.message.text,  # Keep the current caption
+                text=callback.message.text,
                 reply_markup=await create_chapter_buttons(session_id),
                 parse_mode=ParseMode.DISABLED.value
             )
-        
     except Exception as e:
         logger.error(f"Download failed: {e}")
         await callback.answer("Download failed", show_alert=True)
     finally:
         if session_id in sessions.chapter_sessions:
             del sessions.chapter_sessions[session_id]
-
-@shivuu.on_callback_query(filters.regex(r"^chpg:"))
-@error_handler
-async def handle_chapter_pagination(client, callback: CallbackQuery):
-    _, session_id, page = callback.data.split(":")
-    await callback.message.edit_reply_markup(
-        await create_chapter_buttons(session_id, int(page))
-    )
