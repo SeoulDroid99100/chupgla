@@ -9,14 +9,11 @@ from typing import Optional, Tuple, Dict, List
 from functools import wraps
 from io import BytesIO
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
 from fake_useragent import UserAgent
 from shivu import shivuu  # Replace with your Pyrogram Client instance
-import time
 from PIL import Image
 import img2pdf
-import requests
-from requests.exceptions import RequestException
+import aiohttp
 from pyrogram import filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, Message
 from pyrogram.errors import FloodWait, QueryIdInvalid
@@ -61,8 +58,12 @@ class MangaDexClient:
     }
 
     def __init__(self):
-        self.session = requests.Session()
-        self.session.headers.update({"User-Agent": self._generate_user_agent()})
+        self.session = None  # Will be initialized in async context
+
+    async def _get_session(self):
+        if self.session is None or self.session.closed:
+            self.session = aiohttp.ClientSession(headers={"User-Agent": self._generate_user_agent()})
+        return self.session
 
     def _generate_user_agent(self) -> str:
         try:
@@ -71,17 +72,18 @@ class MangaDexClient:
             logger.warning(f"UserAgent failed: {e}")
             return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
-    def _handle_response(self, response: requests.Response) -> dict:
+    async def _handle_response(self, response: aiohttp.ClientResponse) -> dict:
         try:
             response.raise_for_status()
-            return response.json()
-        except (json.JSONDecodeError, requests.HTTPError) as e:
+            return await response.json()
+        except (aiohttp.ContentTypeError, aiohttp.ClientResponseError) as e:
             logger.error(f"Response error: {e}")
             return {}
 
-    def search_manga(self, query: str, offset: int = 0, limit: int = 5) -> Tuple[List[Dict], int]:
+    async def search_manga(self, query: str, offset: int = 0, limit: int = 5) -> Tuple[List[Dict], int]:
+        session = await self._get_session()
         try:
-            response = self.session.get(
+            async with session.get(
                 f"{self.BASE_URL}/manga",
                 params={
                     "title": query,
@@ -91,32 +93,32 @@ class MangaDexClient:
                     "contentRating[]": ["safe", "suggestive", "erotica", "pornographic"],
                     "order[relevance]": "desc"
                 }
-            )
-            data = self._handle_response(response)
-            
-            results = []
-            for manga in data.get('data', []):
-                attrs = manga.get('attributes', {})
-                relationships = manga.get('relationships', [])
+            ) as response:
+                data = await self._handle_response(response)
                 
-                cover_art = next(
-                    (r for r in relationships if r.get('type') == 'cover_art'), None
-                )
-                cover_file = cover_art.get('attributes', {}).get('fileName', '') if cover_art else ''
-                cover_url = f"https://uploads.mangadex.org/covers/{manga['id']}/{cover_file}" if cover_file else ''
+                results = []
+                for manga in data.get('data', []):
+                    attrs = manga.get('attributes', {})
+                    relationships = manga.get('relationships', [])
+                    
+                    cover_art = next(
+                        (r for r in relationships if r.get('type') == 'cover_art'), None
+                    )
+                    cover_file = cover_art.get('attributes', {}).get('fileName', '') if cover_art else ''
+                    cover_url = f"https://uploads.mangadex.org/covers/{manga['id']}/{cover_file}" if cover_file else ''
+                    
+                    results.append({
+                        'id': manga['id'],
+                        'title': attrs.get('title', {}).get('en', 'Untitled'),
+                        'year': attrs.get('year', 'N/A'),
+                        'status': str(attrs.get('status', 'N/A')).capitalize(),
+                        'score': round(attrs.get('rating', {}).get('bayesian', 0) * 10),
+                        'description': self._truncate_description(attrs.get('description', {}).get('en', '')),
+                        'cover_url': cover_url,
+                        'url': f"https://mangadex.org/title/{manga['id']}"
+                    })
                 
-                results.append({
-                    'id': manga['id'],
-                    'title': attrs.get('title', {}).get('en', 'Untitled'),
-                    'year': attrs.get('year', 'N/A'),
-                    'status': str(attrs.get('status', 'N/A')).capitalize(),
-                    'score': round(attrs.get('rating', {}).get('bayesian', 0) * 10),
-                    'description': self._truncate_description(attrs.get('description', {}).get('en', '')),
-                    'cover_url': cover_url,
-                    'url': f"https://mangadex.org/title/{manga['id']}"
-                })
-            
-            return results, data.get('total', 0)
+                return results, data.get('total', 0)
         except Exception as e:
             logger.error(f"Search failed: {e}")
             return [], 0
@@ -126,12 +128,13 @@ class MangaDexClient:
             return text
         return text[:347].rsplit(' ', 1)[0] + "..."
 
-    def get_all_chapters(self, manga_id: str) -> List[Dict]:
+    async def get_all_chapters(self, manga_id: str) -> List[Dict]:
+        session = await self._get_session()
         all_chapters = []
         offset = 0
         limit = 100
         while True:
-            response = self.session.get(
+            async with session.get(
                 f"{self.BASE_URL}/manga/{manga_id}/feed",
                 params={
                     "translatedLanguage[]": "en",
@@ -141,14 +144,14 @@ class MangaDexClient:
                     "offset": offset,
                     "contentRating[]": ["safe", "suggestive", "erotica", "pornographic"]
                 }
-            )
-            data = self._handle_response(response)
-            chapters = data.get('data', [])
-            if not chapters:
-                break
-            all_chapters.extend(chapters)
-            offset += limit
-            time.sleep(1.5)  # This blocks the thread it's running in, but not the event loop when called via run_in_executor
+            ) as response:
+                data = await self._handle_response(response)
+                chapters = data.get('data', [])
+                if not chapters:
+                    break
+                all_chapters.extend(chapters)
+                offset += limit
+                await asyncio.sleep(1.5)  # Non-blocking delay to respect rate limits
         
         # Process chapters to remove duplicates
         seen = set()
@@ -172,6 +175,15 @@ class MangaDexClient:
                 unique_chapters.append(chapter_data)
         
         return unique_chapters
+
+    async def get_chapter_data(self, ch_id: str) -> Dict:
+        session = await self._get_session()
+        async with session.get(f"{self.BASE_URL}/at-home/server/{ch_id}") as response:
+            return await self._handle_response(response)
+
+    async def close(self):
+        if self.session and not self.session.closed:
+            await self.session.close()
 
 # Session Management
 class SessionManager:
@@ -284,9 +296,7 @@ async def mangadex_command(client, message: Message):
     if not query:
         return await message.reply(small_caps("provide manga name"), parse_mode=ParseMode.MARKDOWN.value)
 
-    # Run synchronous search_manga in a thread to avoid blocking
-    loop = asyncio.get_running_loop()
-    results, total = await loop.run_in_executor(None, mdex.search_manga, query)
+    results, total = await mdex.search_manga(query)
 
     if not results:
         # Improved suggestion mechanism
@@ -294,8 +304,7 @@ async def mangadex_command(client, message: Message):
         suggestion_candidates = defaultdict(lambda: {'manga': None, 'freq': 0})
 
         for word in words:
-            # Run synchronous search_manga for suggestions in a thread
-            word_results, _ = await loop.run_in_executor(None, mdex.search_manga, word, 0, 10)
+            word_results, _ = await mdex.search_manga(word, limit=10)
             for manga in word_results:
                 manga_id = manga['id']
                 if suggestion_candidates[manga_id]['manga'] is None:
@@ -318,7 +327,6 @@ async def mangadex_command(client, message: Message):
         if top_suggestions:
             caption = "**Did you mean...**\n"
             buttons = []
-            # Create a temporary session with the suggested mangas
             temp_session_id = sessions.create_search_session(
                 [s[0] for s in top_suggestions], len(top_suggestions), query, 0
             )
@@ -339,7 +347,6 @@ async def mangadex_command(client, message: Message):
             await message.reply(small_caps("no results found"), parse_mode=ParseMode.MARKDOWN.value)
             return
 
-    # Existing logic for when results are found
     session_id = sessions.create_search_session(results, total, query, 0)
     caption, reply_markup = await generate_search_message(session_id)
     await message.reply(
@@ -363,9 +370,7 @@ async def handle_search_select(client, callback: CallbackQuery):
     except (IndexError, ValueError):
         await callback.answer("Invalid selection", show_alert=True)
         return
-    # Run synchronous get_all_chapters in a thread to avoid blocking
-    loop = asyncio.get_running_loop()
-    chapters = await loop.run_in_executor(None, mdex.get_all_chapters, manga['id'])
+    chapters = await mdex.get_all_chapters(manga['id'])
     if not chapters:
         await callback.answer("No chapters available", show_alert=True)
         return
@@ -458,24 +463,24 @@ async def handle_download(client, callback: CallbackQuery):
         await callback.answer("Session expired", show_alert=True)
         return
     try:
-        response = mdex.session.get(f"{mdex.BASE_URL}/at-home/server/{ch_id}")
-        data = mdex._handle_response(response)
+        data = await mdex.get_chapter_data(ch_id)
         if not data or 'chapter' not in data:
             raise ValueError("Invalid chapter data")
         base_url = data['baseUrl']
         images = data['chapter']['data']
+        
+        # Download images asynchronously
         image_buffers = []
         last_reported_progress = 0
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = []
+        async with aiohttp.ClientSession() as session:
+            tasks = []
             for filename in images:
                 url = f"{base_url}/data/{data['chapter']['hash']}/{filename}"
-                futures.append(executor.submit(
-                    lambda u: Image.open(BytesIO(requests.get(u).content)).convert('RGB'),
-                    url
-                ))
-            for idx, future in enumerate(futures):
-                img = future.result()
+                tasks.append(download_image(session, url))
+            for idx, task in enumerate(asyncio.as_completed(tasks)):
+                img_bytes = await task
+                bio = BytesIO(img_bytes)
+                img = Image.open(bio).convert('RGB')
                 bio = BytesIO()
                 img.save(bio, format='JPEG', quality=85)
                 image_buffers.append(bio.getvalue())
@@ -487,8 +492,9 @@ async def handle_download(client, callback: CallbackQuery):
                         parse_mode=ParseMode.DISABLED.value
                     )
                     last_reported_progress = int(progress // 20 * 20)
-        # Run img2pdf.convert in a thread to avoid blocking
-        loop = asyncio.get_running_loop()
+        
+        # Run img2pdf.convert in an executor to avoid blocking
+        loop = shivuu.get_running_loop()
         pdf_bytes = await loop.run_in_executor(None, img2pdf.convert, image_buffers)
         await callback.message.reply_document(
             document=BytesIO(pdf_bytes),
@@ -508,3 +514,7 @@ async def handle_download(client, callback: CallbackQuery):
     finally:
         if session_id in sessions.chapter_sessions:
             del sessions.chapter_sessions[session_id]
+
+async def download_image(session: aiohttp.ClientSession, url: str) -> bytes:
+    async with session.get(url) as response:
+        return await response.read()
