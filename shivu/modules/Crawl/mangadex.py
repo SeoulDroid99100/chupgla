@@ -3,14 +3,14 @@ import json
 import logging
 import hashlib
 import asyncio
-from datetime import datetime, timedelta  # Added timedelta
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Optional, Tuple, Dict, List
 from functools import wraps
 from io import BytesIO
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from fake_useragent import UserAgent  # Ensure this package is installed
+from fake_useragent import UserAgent
 from shivu import shivuu
 from PIL import Image
 import img2pdf
@@ -232,7 +232,7 @@ async def mangadex_command(client, message: Message):
             callback_data=f"srch:{session_id}:{idx}"
         )])
     
-    if len(results) > 5:
+    if total > 5:  # Fixed: Changed from len(results) > 5 to total > 5
         buttons.append([
             InlineKeyboardButton(mdex.SYMBOLS['back'], callback_data=f"pg:{session_id}:prev"),
             InlineKeyboardButton(mdex.SYMBOLS['page'], callback_data=f"pg:{session_id}:next")
@@ -353,7 +353,7 @@ async def handle_download(client, callback: CallbackQuery):
             for filename in images:
                 url = f"{base_url}/data/{data['chapter']['hash']}/{filename}"
                 futures.append(executor.submit(
-                    lambda u: Image.open(BytesIO(requests.get(u).content).convert('RGB'),
+                    lambda u: Image.open(BytesIO(requests.get(u).content)).convert('RGB'),  # Fixed: Added missing parenthesis
                     url
                 ))
             
