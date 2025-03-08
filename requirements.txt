@@ -16,3 +16,6 @@ captcha
 Pillow
 yt-dlp
 uvloop
+requests
+fake_useragent
+img2pdf
