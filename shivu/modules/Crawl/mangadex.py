@@ -12,6 +12,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from fake_useragent import UserAgent
 from shivu import shivuu  # Replace with your Pyrogram Client instance
+import time
 from PIL import Image
 import img2pdf
 import requests
@@ -19,7 +20,6 @@ from requests.exceptions import RequestException
 from pyrogram import filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, Message
 from pyrogram.errors import FloodWait, QueryIdInvalid
-
 # Configure logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
