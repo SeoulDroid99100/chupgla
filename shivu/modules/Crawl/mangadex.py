@@ -18,6 +18,7 @@ import requests
 from requests.exceptions import RequestException
 from pyrogram import filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, Message
+from pyrogram.errors import FloodWait, QueryIdInvalid
 
 # Configure logging
 logging.basicConfig(
@@ -173,12 +174,13 @@ class SessionManager:
         self.search_sessions = {}
         self.chapter_sessions = {}
     
-    def create_search_session(self, results: list, total: int, query: str) -> str:
+    def create_search_session(self, results: list, total: int, query: str, offset: int = 0) -> str:
         session_id = hashlib.md5(f"{datetime.now().timestamp()}".encode()).hexdigest()[:8]
         self.search_sessions[session_id] = {
             'results': results,
             'total': total,
             'query': query,
+            'offset': offset,
             'timestamp': datetime.now()
         }
         return session_id
@@ -200,13 +202,58 @@ def error_handler(func):
     async def wrapper(client, update, *args, **kwargs):
         try:
             return await func(client, update, *args, **kwargs)
+        except FloodWait as e:
+            logger.warning(f"Flood wait required: {e}")
+            await asyncio.sleep(e.value)
+            return await func(client, update, *args, **kwargs)
+        except QueryIdInvalid:
+            logger.warning("Query ID expired, ignoring answer")
         except Exception as e:
             logger.error(f"Error in {func.__name__}: {e}", exc_info=True)
             if isinstance(update, Message):
                 await update.reply(small_caps("operation failed: internal error"), parse_mode=ParseMode.MARKDOWN.value)
             elif isinstance(update, CallbackQuery):
-                await update.answer(small_caps("operation failed"), show_alert=True)
+                try:
+                    await update.answer(small_caps("operation failed"), show_alert=True)
+                except QueryIdInvalid:
+                    pass
     return wrapper
+
+async def generate_search_message(session_id: str) -> Tuple[str, InlineKeyboardMarkup]:
+    session = sessions.search_sessions.get(session_id)
+    if not session:
+        return "", InlineKeyboardMarkup([])
+
+    results = session['results']
+    total = session['total']
+    current_offset = session['offset']
+
+    caption = f"**{small_caps('search results')}**\n{mdex.SYMBOLS['divider']}\n"
+    for idx, res in enumerate(results):
+        caption += f"{idx+1}. [{res['title']}]({res['cover_url']})\n★ {res['score']}/100\n"
+
+    buttons = []
+    for idx in range(len(results)):
+        buttons.append([InlineKeyboardButton(
+            f"{idx+1}. {results[idx]['title'][:25]}",
+            callback_data=f"srch:{session_id}:{idx}"
+        )])
+
+    pagination_buttons = []
+    if current_offset > 0:
+        pagination_buttons.append(InlineKeyboardButton(
+            mdex.SYMBOLS['back'], callback_data=f"pg:{session_id}:prev"
+        ))
+    
+    if (current_offset + 5) < total:
+        pagination_buttons.append(InlineKeyboardButton(
+            mdex.SYMBOLS['page'], callback_data=f"pg:{session_id}:next"
+        ))
+    
+    if pagination_buttons:
+        buttons.append(pagination_buttons)
+
+    return caption[:1024], InlineKeyboardMarkup(buttons)
 
 @shivuu.on_message(filters.command("mangadex"))
 @error_handler
@@ -219,28 +266,47 @@ async def mangadex_command(client, message: Message):
     if not results:
         return await message.reply(small_caps("no results found"), parse_mode=ParseMode.MARKDOWN.value)
 
-    session_id = sessions.create_search_session(results, total, query)
-    
-    caption = f"**{small_caps('search results')}**\n{mdex.SYMBOLS['divider']}\n"
-    for idx, res in enumerate(results[:5]):
-        caption += f"{idx+1}. [{res['title']}]({res['cover_url']})\n★ {res['score']}/100\n"
-    
-    buttons = []
-    for idx in range(len(results[:5])):
-        buttons.append([InlineKeyboardButton(
-            f"{idx+1}. {results[idx]['title'][:25]}",
-            callback_data=f"srch:{session_id}:{idx}"
-        )])
-    
-    if total > 5:  # Fixed: Changed from len(results) > 5 to total > 5
-        buttons.append([
-            InlineKeyboardButton(mdex.SYMBOLS['back'], callback_data=f"pg:{session_id}:prev"),
-            InlineKeyboardButton(mdex.SYMBOLS['page'], callback_data=f"pg:{session_id}:next")
-        ])
-    
+    session_id = sessions.create_search_session(results, total, query, 0)
+    caption, reply_markup = await generate_search_message(session_id)
     await message.reply(
-        text=caption[:1024],
-        reply_markup=InlineKeyboardMarkup(buttons),
+        text=caption,
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.MARKDOWN.value,
+        disable_web_page_preview=False
+    )
+
+@shivuu.on_callback_query(filters.regex(r"^pg:"))
+@error_handler
+async def handle_search_pagination(client, callback: CallbackQuery):
+    _, session_id, action = callback.data.split(":")
+    session = sessions.search_sessions.get(session_id)
+    
+    if not session or datetime.now() - session['timestamp'] > timedelta(minutes=10):
+        await callback.answer("Session expired", show_alert=True)
+        return
+
+    new_offset = session['offset']
+    if action == "next":
+        new_offset += 5
+    elif action == "prev":
+        new_offset = max(0, new_offset - 5)
+
+    # Fetch new results with updated offset
+    results, total = mdex.search_manga(session['query'], new_offset)
+    if not results:
+        await callback.answer("No more results", show_alert=True)
+        return
+
+    # Update session with new results and offset
+    session['results'] = results
+    session['offset'] = new_offset
+    session['timestamp'] = datetime.now()
+
+    # Edit message with new caption and buttons
+    caption, reply_markup = await generate_search_message(session_id)
+    await callback.message.edit_text(
+        text=caption,
+        reply_markup=reply_markup,
         parse_mode=ParseMode.MARKDOWN.value,
         disable_web_page_preview=False
     )
@@ -353,7 +419,7 @@ async def handle_download(client, callback: CallbackQuery):
             for filename in images:
                 url = f"{base_url}/data/{data['chapter']['hash']}/{filename}"
                 futures.append(executor.submit(
-                    lambda u: Image.open(BytesIO(requests.get(u).content)).convert('RGB'),  # Fixed: Added missing parenthesis
+                    lambda u: Image.open(BytesIO(requests.get(u).content)).convert('RGB'),
                     url
                 ))
             
@@ -363,11 +429,12 @@ async def handle_download(client, callback: CallbackQuery):
                 img.save(bio, format='JPEG', quality=85)
                 image_buffers.append(bio.getvalue())
                 
-                progress = (idx+1)/len(images)
-                await callback.message.edit_text(
-                    f"Downloading... {int(progress*100)}%",
-                    parse_mode=ParseMode.DISABLED.value
-                )
+                if idx % 5 == 0 or idx == len(images) - 1:
+                    progress = (idx + 1) / len(images)
+                    await callback.message.edit_text(
+                        f"Downloading... {int(progress * 100)}%",
+                        parse_mode=ParseMode.DISABLED.value
+                    )
         
         pdf_bytes = img2pdf.convert(image_buffers)
         
@@ -391,3 +458,5 @@ async def handle_chapter_pagination(client, callback: CallbackQuery):
     await callback.message.edit_reply_markup(
         await create_chapter_buttons(session_id, int(page))
     )
+
+# Note: The 'back:' callback handler is assumed to exist elsewhere in the codebase.
