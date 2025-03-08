@@ -18,16 +18,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Small caps text converter (assuming this is defined elsewhere)
+# Small caps text converter
 SMALL_CAPS_TRANS = str.maketrans(
     'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ',
-    'ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴷxʏᴢᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ'
+    'ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ'
 )
 
 def small_caps(text: str) -> str:
     return text.translate(SMALL_CAPS_TRANS)
 
-# Error handling decorator (assuming this is defined elsewhere)
+# Error handling decorator
 def error_handler(func):
     @wraps(func)
     async def wrapper(client, update, *args, **kwargs):
@@ -138,12 +138,13 @@ class SessionManager:
     def __init__(self):
         self.search_sessions = {}
         self.genre_selection_sessions = {}
+        self.navigation_history = {}  # New: Track navigation history
 
     def create_search_session(self, results: List[Dict], total: int, query: str = "", 
                               genre_ids: List[str] = None, 
                               content_rating: List[str] = ["safe", "suggestive", "erotica", "pornographic"], 
-                              offset: int = 0) -> str:
-        """Create a search session with genre and content rating support."""
+                              offset: int = 0, navigation_state: str = "") -> str:
+        """Create a search session with genre, content rating, and navigation state."""
         session_id = hashlib.md5(f"{datetime.now().timestamp()}".encode()).hexdigest()[:8]
         self.search_sessions[session_id] = {
             'results': results,
@@ -152,7 +153,8 @@ class SessionManager:
             'genre_ids': genre_ids,
             'content_rating': content_rating,
             'offset': offset,
-            'timestamp': datetime.now()
+            'timestamp': datetime.now(),
+            'navigation_state': navigation_state  # Store navigation state
         }
         return session_id
 
@@ -162,12 +164,14 @@ class SessionManager:
             return session
         return None
 
-    def create_genre_selection_session(self, selected_genres: List[str] = None) -> str:
-        """Create a session for genre selection."""
+    def create_genre_selection_session(self, selected_genres: List[str] = None, 
+                                      navigation_state: str = "") -> str:
+        """Create a session for genre selection with navigation state."""
         session_id = hashlib.md5(f"{datetime.now().timestamp()}".encode()).hexdigest()[:8]
         self.genre_selection_sessions[session_id] = {
             'selected_genres': selected_genres or [],
-            'timestamp': datetime.now()
+            'timestamp': datetime.now(),
+            'navigation_state': navigation_state  # Store navigation state
         }
         return session_id
 
@@ -184,12 +188,26 @@ class SessionManager:
             session['selected_genres'] = selected_genres
             session['timestamp'] = datetime.now()
 
+    def add_navigation_state(self, session_id: str, state: str, prev_session_id: str = ""):
+        """Add navigation state to history."""
+        self.navigation_history[session_id] = {
+            'state': state,
+            'prev_session_id': prev_session_id,
+            'timestamp': datetime.now()
+        }
+
+    def get_navigation_state(self, session_id: str) -> Optional[Dict]:
+        nav = self.navigation_history.get(session_id)
+        if nav and datetime.now() - nav['timestamp'] < timedelta(hours=1):
+            return nav
+        return None
+
 # Initialize clients
 mdex = MangaDexClient()
 sessions = SessionManager()
 
 async def generate_search_message(session_id: str) -> Tuple[str, InlineKeyboardMarkup]:
-    """Generate search results message (assumed to be defined elsewhere)."""
+    """Generate search results message with back navigation."""
     session = sessions.get_search_session(session_id)
     if not session:
         return "", InlineKeyboardMarkup([])
@@ -197,6 +215,7 @@ async def generate_search_message(session_id: str) -> Tuple[str, InlineKeyboardM
     results = session['results']
     total = session['total']
     current_offset = session['offset']
+    navigation_state = session.get('navigation_state', '')
 
     caption = f"**{small_caps('search results')}**\n{mdex.SYMBOLS['divider']}\n"
     for idx, res in enumerate(results):
@@ -222,6 +241,20 @@ async def generate_search_message(session_id: str) -> Tuple[str, InlineKeyboardM
 
     if pagination_buttons:
         buttons.append(pagination_buttons)
+
+    # Add Back button based on navigation state
+    if navigation_state == "genre_selection":
+        nav = sessions.get_navigation_state(session_id)
+        if nav and nav['prev_session_id']:
+            buttons.append([InlineKeyboardButton(
+                "🔙 Back to Genre Selection", 
+                callback_data=f"back_to_genre:{nav['prev_session_id']}"
+            )])
+    elif navigation_state == "horny":
+        buttons.append([InlineKeyboardButton(
+            "🔙 Restart /horny", 
+            callback_data="restart_horny"
+        )])
 
     return caption[:1024], InlineKeyboardMarkup(buttons)
 
@@ -251,7 +284,7 @@ async def recommend_command(client, message: Message):
             await message.reply(small_caps("no genres found for this manga"), parse_mode=ParseMode.MARKDOWN)
     else:
         caption = f"**Title not found: {query}**\nWould you like to select genres manually?"
-        buttons = [[InlineKeyboardButton("Select Genres", callback_data="select_genres")]]
+        buttons = [[InlineKeyboardButton("Select Genres", callback_data=f"select_genres:{query}")]]
         await message.reply(
             text=caption,
             reply_markup=InlineKeyboardMarkup(buttons),
@@ -280,8 +313,10 @@ async def horny_command(client, message: Message):
         total, 
         "", 
         [manhwa_id], 
-        ["erotica", "pornographic"]
+        ["erotica", "pornographic"],
+        navigation_state="horny"
     )
+    sessions.add_navigation_state(session_id, "horny")
     caption, reply_markup = await generate_search_message(session_id)
     await message.reply(
         text=caption,
@@ -292,12 +327,13 @@ async def horny_command(client, message: Message):
 
 # Generate Genre Selection Buttons
 async def generate_genre_buttons(session_id: str, page: int = 0) -> InlineKeyboardMarkup:
-    """Generate paginated inline buttons for genre selection."""
+    """Generate paginated inline buttons for genre selection with back navigation."""
     session = sessions.get_genre_selection_session(session_id)
     if not session:
         return InlineKeyboardMarkup([])
 
     selected_genres = session['selected_genres']
+    navigation_state = session.get('navigation_state', '')
     PAGE_SIZE = 10
     genres = mdex.genres
     total_pages = (len(genres) + PAGE_SIZE - 1) // PAGE_SIZE
@@ -323,14 +359,23 @@ async def generate_genre_buttons(session_id: str, page: int = 0) -> InlineKeyboa
     if selected_genres:
         buttons.append([InlineKeyboardButton("Search with Selected Genres", callback_data=f"search_genres:{session_id}")])
     
+    # Add Back button based on navigation state
+    if navigation_state:
+        buttons.append([InlineKeyboardButton(
+            "🔙 Back to Initial Prompt", 
+            callback_data=f"back_to_initial:{navigation_state}"
+        )])
+
     return InlineKeyboardMarkup(buttons)
 
 # Callback Handlers
-@shivuu.on_callback_query(filters.regex(r"^select_genres$"))
+@shivuu.on_callback_query(filters.regex(r"^select_genres:"))
 @error_handler
 async def handle_select_genres(client, callback: CallbackQuery):
     """Show genre selection when title is not found."""
-    session_id = sessions.create_genre_selection_session()
+    _, query = callback.data.split(":")
+    session_id = sessions.create_genre_selection_session(navigation_state=query)
+    sessions.add_navigation_state(session_id, "genre_selection")
     await callback.message.edit_text(
         "Select genres (you can select multiple):",
         reply_markup=await generate_genre_buttons(session_id, 0)
@@ -377,7 +422,14 @@ async def handle_search_genres(client, callback: CallbackQuery):
     if not results:
         await callback.answer("No manga found with these genres", show_alert=True)
         return
-    search_session_id = sessions.create_search_session(results, total, "", genre_ids)
+    search_session_id = sessions.create_search_session(
+        results, 
+        total, 
+        "", 
+        genre_ids,
+        navigation_state="genre_selection"
+    )
+    sessions.add_navigation_state(search_session_id, "search_results", session_id)
     caption, reply_markup = await generate_search_message(search_session_id)
     await callback.message.edit_text(
         text=caption,
@@ -396,6 +448,7 @@ async def handle_recommend_genre(client, callback: CallbackQuery):
         await callback.answer("No manga found with this genre", show_alert=True)
         return
     session_id = sessions.create_search_session(results, total, "", [genre_id])
+    sessions.add_navigation_state(session_id, "search_results")
     caption, reply_markup = await generate_search_message(session_id)
     await callback.message.edit_text(
         text=caption,
@@ -435,14 +488,80 @@ async def handle_search_pagination(client, callback: CallbackQuery):
     session['results'] = results
     session['offset'] = new_offset
     session['timestamp'] = datetime.now()
-    session_id = sessions.create_search_session(
+    new_session_id = sessions.create_search_session(
         results, 
         total, 
         session['query'], 
         session.get('genre_ids'), 
         session.get('content_rating', ["safe", "suggestive", "erotica", "pornographic"]), 
-        new_offset
+        new_offset,
+        navigation_state=session.get('navigation_state', '')
     )
+    nav = sessions.get_navigation_state(session_id)
+    if nav:
+        sessions.add_navigation_state(new_session_id, nav['state'], nav['prev_session_id'])
+    caption, reply_markup = await generate_search_message(new_session_id)
+    await callback.message.edit_text(
+        text=caption,
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.MARKDOWN,
+        disable_web_page_preview=False
+    )
+
+@shivuu.on_callback_query(filters.regex(r"^back_to_genre:"))
+@error_handler
+async def handle_back_to_genre(client, callback: CallbackQuery):
+    """Handle back navigation to genre selection."""
+    _, session_id = callback.data.split(":")
+    session = sessions.get_genre_selection_session(session_id)
+    if not session:
+        await callback.answer("Session expired", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "Select genres (you can select multiple):",
+        reply_markup=await generate_genre_buttons(session_id, 0)
+    )
+
+@shivuu.on_callback_query(filters.regex(r"^back_to_initial:"))
+@error_handler
+async def handle_back_to_initial(client, callback: CallbackQuery):
+    """Handle back navigation to initial prompt."""
+    _, query = callback.data.split(":")
+    caption = f"**Title not found: {query}**\nWould you like to select genres manually?"
+    buttons = [[InlineKeyboardButton("Select Genres", callback_data=f"select_genres:{query}")]]
+    await callback.message.edit_text(
+        text=caption,
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+@shivuu.on_callback_query(filters.regex(r"^restart_horny$"))
+@error_handler
+async def handle_restart_horny(client, callback: CallbackQuery):
+    """Handle restart of /horny command."""
+    manhwa_tag = next((tag for tag in mdex.tags if tag['attributes']['name']['en'].lower() == 'manhwa'), None)
+    if not manhwa_tag:
+        await callback.message.edit_text(small_caps("manhwa tag not found"), parse_mode=ParseMode.MARKDOWN)
+        return
+    manhwa_id = manhwa_tag['id']
+    results, total = mdex.search_manga(
+        "", 
+        limit=5, 
+        genre_ids=[manhwa_id], 
+        content_rating=["erotica", "pornographic"]
+    )
+    if not results:
+        await callback.message.edit_text(small_caps("no adult manhwas found"), parse_mode=ParseMode.MARKDOWN)
+        return
+    session_id = sessions.create_search_session(
+        results, 
+        total, 
+        "", 
+        [manhwa_id], 
+        ["erotica", "pornographic"],
+        navigation_state="horny"
+    )
+    sessions.add_navigation_state(session_id, "horny")
     caption, reply_markup = await generate_search_message(session_id)
     await callback.message.edit_text(
         text=caption,
