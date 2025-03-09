@@ -1,3 +1,4 @@
+from shivu import shivuu
 import os
 import json
 import logging
@@ -9,7 +10,6 @@ from functools import wraps
 from io import BytesIO
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from shivu import shivuu
 from PIL import Image
 import img2pdf
 import aiohttp
@@ -17,8 +17,7 @@ from pyrogram import filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, Message
 from pyrogram.errors import FloodWait, QueryIdInvalid
 from difflib import SequenceMatcher
-import asyncio 
-
+import asyncio
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
@@ -88,6 +87,8 @@ class MangaDexClient:
                 
                 results = []
                 for manga in data.get('data', []):
+                    if not isinstance(manga, dict):
+                        continue
                     attrs = manga.get('attributes', {})
                     relationships = manga.get('relationships', [])
                     
@@ -98,14 +99,14 @@ class MangaDexClient:
                     cover_url = f"https://uploads.mangadex.org/covers/{manga['id']}/{cover_file}" if cover_file else ''
                     
                     results.append({
-                        'id': manga['id'],
+                        'id': manga.get('id', ''),
                         'title': attrs.get('title', {}).get('en', 'Untitled'),
                         'year': attrs.get('year', 'N/A'),
                         'status': str(attrs.get('status', 'N/A')).capitalize(),
                         'score': round(attrs.get('rating', {}).get('bayesian', 0) * 10),
                         'description': self._truncate_description(attrs.get('description', {}).get('en', '')),
                         'cover_url': cover_url,
-                        'url': f"https://mangadex.org/title/{manga['id']}"
+                        'url': f"https://mangadex.org/title/{manga.get('id', '')}"
                     })
                 
                 return results, data.get('total', 0)
@@ -143,6 +144,8 @@ class MangaDexClient:
         seen = set()
         unique_chapters = []
         for ch in all_chapters:
+            if not isinstance(ch, dict):
+                continue
             attributes = ch.get('attributes', {})
             relationships = ch.get('relationships', [])
             group = next(
@@ -150,7 +153,7 @@ class MangaDexClient:
             )
             group_name = group.get('attributes', {}).get('name', 'Unknown') if group else 'Unknown'
             chapter_data = {
-                'id': ch['id'],
+                'id': ch.get('id', ''),
                 'chapter': str(attributes.get('chapter', 'Oneshot')),
                 'title': attributes.get('title', ''),
                 'group': group_name
@@ -275,8 +278,12 @@ async def mangadex_command(client, message: Message):
 
         for word in words:
             word_results, _ = await mdex.search_manga(word, limit=10)
+            if not isinstance(word_results, list):
+                word_results = []
             for manga in word_results:
-                manga_id = manga['id']
+                if not isinstance(manga, dict):
+                    continue
+                manga_id = manga.get('id')
                 if suggestion_candidates[manga_id]['manga'] is None:
                     suggestion_candidates[manga_id]['manga'] = manga
                 suggestion_candidates[manga_id]['freq'] += 1
@@ -285,7 +292,9 @@ async def mangadex_command(client, message: Message):
         suggestions = []
         for candidate in suggestion_candidates.values():
             manga = candidate['manga']
-            title = manga['title'].lower()
+            if not isinstance(manga, dict):
+                continue
+            title = manga.get('title', {}).get('en', '').lower()
             similarity = SequenceMatcher(None, query.lower(), title).ratio()
             suggestions.append((manga, similarity, candidate['freq']))
 
@@ -299,9 +308,12 @@ async def mangadex_command(client, message: Message):
                 [s[0] for s in top_suggestions], len(top_suggestions), query, 0
             )
             for idx, (manga, sim, freq) in enumerate(top_suggestions):
-                caption += f"{idx+1}. {manga['title']} (Similarity: {int(sim*100)}%)\n"
+                if not isinstance(manga, dict):
+                    continue
+                title = manga.get('title', {}).get('en', 'Untitled')
+                caption += f"{idx+1}. {title} (Similarity: {int(sim*100)}%)\n"
                 buttons.append([InlineKeyboardButton(
-                    f"{idx+1}. {manga['title'][:25]}",
+                    f"{idx+1}. {title[:25]}",
                     callback_data=f"srch:{temp_session_id}:{idx}"
                 )])
             await message.reply(
