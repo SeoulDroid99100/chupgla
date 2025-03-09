@@ -9,6 +9,7 @@ from functools import wraps
 from io import BytesIO
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from shivu import shivuu
 from PIL import Image
 import img2pdf
 import aiohttp
@@ -16,7 +17,6 @@ from pyrogram import filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, Message
 from pyrogram.errors import FloodWait, QueryIdInvalid
 from difflib import SequenceMatcher
-
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
