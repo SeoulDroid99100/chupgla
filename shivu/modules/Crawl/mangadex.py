@@ -9,12 +9,11 @@ from typing import Optional, Tuple, Dict, List
 from functools import wraps
 from io import BytesIO
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
 from fake_useragent import UserAgent
 from shivu import shivuu  # Replace with your Pyrogram Client instance
 from PIL import Image
 import img2pdf
-import httpx
+import aiohttp  # Replaces requests with aiohttp
 from pyrogram import filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, Message
 from pyrogram.errors import FloodWait, QueryIdInvalid
@@ -36,7 +35,7 @@ class ParseMode(Enum):
 # Small caps text converter
 SMALL_CAPS_TRANS = str.maketrans(
     'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ',
-    'á´€Ê™á´„á´…á´‡êœ°É¢ÊœÉªá´Šá´‹ÊŸá´É´á´á´˜Ç«Ê€sá´›á´œá´á´¡xÊá´¢á´€Ê™á´„á´…á´‡êœ°É¢ÊœÉªá´Šá´‹ÊŸá´É´á´á´˜Ç«Ê€sá´›á´œá´á´¡xÊá´¢'
+    'ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ'
 )
 
 def small_caps(text: str) -> str:
@@ -46,26 +45,26 @@ def small_caps(text: str) -> str:
 class MangaDexClient:
     BASE_URL = "https://api.mangadex.org"
     SYMBOLS = {
-        'title': 'âŒ–',
-        'divider': 'â–°â–±'*5,
-        'list_item': 'â–¢',
-        'arrow': 'âž¾',
-        'nav_prev': 'â—€',
-        'nav_next': 'â–¶',
-        'progress': 'â–°',
-        'inactive': 'â–±',
-        'page': 'â«¸',
-        'back': 'â«·'
+        'title': '⌖',
+        'divider': '▰▱'*5,
+        'list_item': '▢',
+        'arrow': '➾',
+        'nav_prev': '◀',
+        'nav_next': '▶',
+        'progress': '▰',
+        'inactive': '▱',
+        'page': '⫸',
+        'back': '⫷'
     }
 
     def __init__(self):
-        self.session = httpx.AsyncClient(
-            headers={"User-Agent": self._generate_user_agent()},
-            timeout=30.0
-        )
+        self.session = None  # Lazily initialized aiohttp session
 
-    async def close(self):
-        await self.session.aclose()
+    async def _get_session(self) -> aiohttp.ClientSession:
+        if self.session is None or self.session.closed:
+            headers = {"User-Agent": self._generate_user_agent()}
+            self.session = aiohttp.ClientSession(headers=headers)
+        return self.session
 
     def _generate_user_agent(self) -> str:
         try:
@@ -74,35 +73,40 @@ class MangaDexClient:
             logger.warning(f"UserAgent failed: {e}")
             return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
-    async def _handle_response(self, response: httpx.Response) -> dict:
+    async def _handle_response(self, response: aiohttp.ClientResponse) -> dict:
         try:
             response.raise_for_status()
-            return response.json()
-        except (json.JSONDecodeError, httpx.HTTPError) as e:
+            return await response.json()
+        except (aiohttp.ClientError, json.JSONDecodeError) as e:
             logger.error(f"Response error: {e}")
             return {}
 
     async def search_manga(self, query: str, offset: int = 0, limit: int = 5) -> Tuple[List[Dict], int]:
+        session = await self._get_session()
         try:
-            params = {
-                "title": query,
-                "limit": limit,
-                "offset": offset,
-                "includes[]": ["cover_art"],
-                "contentRating[]": ["safe", "suggestive", "erotica", "pornographic"],
-                "order[relevance]": "desc"
-            }
-            async with self.session.get(f"{self.BASE_URL}/manga", params=params) as response:
+            async with session.get(
+                f"{self.BASE_URL}/manga",
+                params={
+                    "title": query,
+                    "limit": limit,
+                    "offset": offset,
+                    "includes[]": ["cover_art"],
+                    "contentRating[]": ["safe", "suggestive", "erotica", "pornographic"],
+                    "order[relevance]": "desc"
+                }
+            ) as response:
                 data = await self._handle_response(response)
                 results = []
                 for manga in data.get('data', []):
                     attrs = manga.get('attributes', {})
                     relationships = manga.get('relationships', [])
+
                     cover_art = next(
                         (r for r in relationships if r.get('type') == 'cover_art'), None
                     )
                     cover_file = cover_art.get('attributes', {}).get('fileName', '') if cover_art else ''
                     cover_url = f"https://uploads.mangadex.org/covers/{manga['id']}/{cover_file}" if cover_file else ''
+
                     results.append({
                         'id': manga['id'],
                         'title': attrs.get('title', {}).get('en', 'Untitled'),
@@ -113,10 +117,12 @@ class MangaDexClient:
                         'cover_url': cover_url,
                         'url': f"https://mangadex.org/title/{manga['id']}"
                     })
+
                 return results, data.get('total', 0)
         except Exception as e:
             logger.error(f"Search failed: {e}")
             return [], 0
+
 
     def _truncate_description(self, text: str) -> str:
         if len(text) <= 350:
@@ -124,26 +130,34 @@ class MangaDexClient:
         return text[:347].rsplit(' ', 1)[0] + "..."
 
     async def get_all_chapters(self, manga_id: str) -> List[Dict]:
+        session = await self._get_session()
         all_chapters = []
         offset = 0
         limit = 100
         while True:
-            params = {
-                "translatedLanguage[]": "en",
-                "order[chapter]": "asc",
-                "includes[]": ["scanlation_group"],
-                "limit": limit,
-                "offset": offset,
-                "contentRating[]": ["safe", "suggestive", "erotica", "pornographic"]
-            }
-            async with self.session.get(f"{self.BASE_URL}/manga/{manga_id}/feed", params=params) as response:
-                data = await self._handle_response(response)
-                chapters = data.get('data', [])
-                if not chapters:
-                    break
-                all_chapters.extend(chapters)
-                offset += limit
-                await asyncio.sleep(1.5)  # Delay to avoid rate limiting
+            try:
+                async with session.get(
+                    f"{self.BASE_URL}/manga/{manga_id}/feed",
+                    params={
+                        "translatedLanguage[]": "en",
+                        "order[chapter]": "asc",
+                        "includes[]": ["scanlation_group"],
+                        "limit": limit,
+                        "offset": offset,
+                        "contentRating[]": ["safe", "suggestive", "erotica", "pornographic"]
+                    }
+                ) as response:
+                    data = await self._handle_response(response)
+                    chapters = data.get('data', [])
+                    if not chapters:
+                        break
+                    all_chapters.extend(chapters)
+                    offset += limit
+                    await asyncio.sleep(1.5)  # Async sleep
+
+            except Exception as e:
+                logger.error(f"Error fetching chapters: {e}")
+                break
 
         # Process chapters to remove duplicates
         seen = set()
@@ -165,6 +179,7 @@ class MangaDexClient:
             if identifier not in seen:
                 seen.add(identifier)
                 unique_chapters.append(chapter_data)
+
         return unique_chapters
 
 # Session Management
@@ -238,29 +253,36 @@ async def generate_search_message(session_id: str) -> Tuple[str, InlineKeyboardM
     session = sessions.get_search_session(session_id)
     if not session:
         return "", InlineKeyboardMarkup([])
+
     results = session['results']
     total = session['total']
     current_offset = session['offset']
+
     caption = f"**{small_caps('search results')}**\n{mdex.SYMBOLS['divider']}\n"
     for idx, res in enumerate(results):
-        caption += f"{idx+1}. [{res['title']}]({res['cover_url']})\nâ˜… {res['score']}/100\n"
+        caption += f"{idx+1}. [{res['title']}]({res['cover_url']})\n★ {res['score']}/100\n"
+
     buttons = []
     for idx in range(len(results)):
         buttons.append([InlineKeyboardButton(
             f"{idx+1}. {results[idx]['title'][:25]}",
             callback_data=f"srch:{session_id}:{idx}"
         )])
+
     pagination_buttons = []
     if current_offset > 0:
         pagination_buttons.append(InlineKeyboardButton(
             mdex.SYMBOLS['back'], callback_data=f"pg:{session_id}:prev"
         ))
+
     if (current_offset + 5) < total:
         pagination_buttons.append(InlineKeyboardButton(
             mdex.SYMBOLS['page'], callback_data=f"pg:{session_id}:next"
         ))
+
     if pagination_buttons:
         buttons.append(pagination_buttons)
+
     return caption[:1024], InlineKeyboardMarkup(buttons)
 
 # Command to search manga
@@ -270,19 +292,22 @@ async def mangadex_command(client, message: Message):
     query = " ".join(message.command[1:])
     if not query:
         return await message.reply(small_caps("provide manga name"), parse_mode=ParseMode.MARKDOWN.value)
-    results, total = await mdex.search_manga(query)
+
+    results, total = await mdex.search_manga(query)  # Await the async call
     if not results:
         # Improved suggestion mechanism
         words = query.split()[:3]  # Limit to first 3 words
         suggestion_candidates = defaultdict(lambda: {'manga': None, 'freq': 0})
+
         for word in words:
-            word_results, _ = await mdex.search_manga(word, limit=10)  # Limit to 10 results per word
+            word_results, _ = await mdex.search_manga(word, limit=10)  # Limit, and await
             for manga in word_results:
                 manga_id = manga['id']
                 if suggestion_candidates[manga_id]['manga'] is None:
                     suggestion_candidates[manga_id]['manga'] = manga
                 suggestion_candidates[manga_id]['freq'] += 1
-            await asyncio.sleep(0.5)  # Delay to respect rate limits
+            await asyncio.sleep(0.5)
+
         # Compute similarity and rank suggestions
         suggestions = []
         for candidate in suggestion_candidates.values():
@@ -290,9 +315,11 @@ async def mangadex_command(client, message: Message):
             title = manga['title'].lower()
             similarity = SequenceMatcher(None, query.lower(), title).ratio()
             suggestions.append((manga, similarity, candidate['freq']))
+
         # Sort by similarity (primary) and frequency (secondary), descending
         suggestions.sort(key=lambda x: (x[1], x[2]), reverse=True)
         top_suggestions = suggestions[:5]  # Take top 5
+
         if top_suggestions:
             caption = "**Did you mean...**\n"
             buttons = []
@@ -316,6 +343,7 @@ async def mangadex_command(client, message: Message):
         else:
             await message.reply(small_caps("no results found"), parse_mode=ParseMode.MARKDOWN.value)
             return
+
     # Existing logic for when results are found
     session_id = sessions.create_search_session(results, total, query, 0)
     caption, reply_markup = await generate_search_message(session_id)
@@ -340,7 +368,7 @@ async def handle_search_select(client, callback: CallbackQuery):
     except (IndexError, ValueError):
         await callback.answer("Invalid selection", show_alert=True)
         return
-    chapters = await mdex.get_all_chapters(manga['id'])
+    chapters = await mdex.get_all_chapters(manga['id'])  # Await
     if not chapters:
         await callback.answer("No chapters available", show_alert=True)
         return
@@ -391,7 +419,7 @@ async def create_chapter_buttons(session_id: str, page: int = 0) -> InlineKeyboa
         buttons.append(nav_buttons)
     buttons.append([
         InlineKeyboardButton(
-            "ðŸ”™ Back to Results",
+            "🔙 Back to Results",
             callback_data=f"back:{search_session_id}"
         )
     ])
@@ -423,23 +451,6 @@ async def handle_back_button(client, callback: CallbackQuery):
         disable_web_page_preview=False
     )
 
-# Async image download and processing
-async def download_and_process_image(session: httpx.AsyncClient, url: str) -> Optional[bytes]:
-    try:
-        async with session.get(url) as response:
-            response.raise_for_status()
-            content = await response.read()
-            loop = asyncio.get_event_loop()
-            # Process image in thread pool
-            img = await loop.run_in_executor(None, Image.open, BytesIO(content))
-            img = await loop.run_in_executor(None, img.convert, 'RGB')
-            bio = BytesIO()
-            await loop.run_in_executor(None, img.save, bio, 'JPEG', {'quality': 85})
-            return bio.getvalue()
-    except Exception as e:
-        logger.error(f"Image processing failed: {e}")
-        return None
-
 # Handle chapter download
 @shivuu.on_callback_query(filters.regex(r"^dl:"))
 @error_handler
@@ -449,54 +460,49 @@ async def handle_download(client, callback: CallbackQuery):
     if not session:
         await callback.answer("Session expired", show_alert=True)
         return
-
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{mdex.BASE_URL}/at-home/server/{ch_id}")
+        mdex_session = await mdex._get_session()
+        async with mdex_session.get(f"{mdex.BASE_URL}/at-home/server/{ch_id}") as response:
             data = await mdex._handle_response(response)
             if not data or 'chapter' not in data:
                 raise ValueError("Invalid chapter data")
-
             base_url = data['baseUrl']
             images = data['chapter']['data']
-            image_urls = [f"{base_url}/data/{data['chapter']['hash']}/{filename}" for filename in images]
-
-            # Download and process images concurrently
             image_buffers = []
-            async with asyncio.TaskGroup() as tg:
-                tasks = [
-                    tg.create_task(download_and_process_image(client, url))
-                    for url in image_urls
-                ]
+            last_reported_progress = 0
 
-                # Progress tracking
-                last_progress = 0
-                for idx, task in enumerate(tasks):
-                    image_data = await task
-                    if image_data:
-                        image_buffers.append(image_data)
-                        progress = (idx + 1) / len(tasks) * 100
-                        if progress - last_progress >= 20 or idx == len(tasks) - 1:
-                            await callback.message.edit_text(
-                                f"Downloading... {int(progress)}%",
-                                parse_mode=ParseMode.DISABLED.value
-                            )
-                            last_progress = progress
+            # Download all images asynchronously
+            image_bytes_list = []
+            for filename in images:
+                url = f"{base_url}/data/{data['chapter']['hash']}/{filename}"
+                async with mdex_session.get(url) as img_response:
+                    img_bytes = await img_response.read()
+                    image_bytes_list.append(img_bytes)
 
-            # Convert to PDF in thread pool
-            loop = asyncio.get_event_loop()
-            pdf_bytes = await loop.run_in_executor(
-                None,
-                img2pdf.convert,
-                image_buffers
-            )
+            # Process images in threads
+            for idx, img_bytes in enumerate(image_bytes_list):
+                img = await asyncio.to_thread(
+                    lambda: Image.open(BytesIO(img_bytes)).convert('RGB')
+                )
+                bio = BytesIO()
+                await asyncio.to_thread(
+                    lambda: img.save(bio, format='JPEG', quality=85)
+                )
+                image_buffers.append(bio.getvalue())
+                # Update progress
+                progress = (idx + 1) / len(images) * 100
+                next_threshold = (last_reported_progress // 20 + 1) * 20
+                if progress >= next_threshold or idx == len(images) - 1:
+                    await callback.message.edit_text(f"Downloading... {int(progress)}%")
+                    last_reported_progress = int(progress // 20 * 20)
 
+            # Convert to PDF in a thread
+            pdf_bytes = await asyncio.to_thread(img2pdf.convert, image_buffers)
             await callback.message.reply_document(
                 document=BytesIO(pdf_bytes),
                 file_name=f"{small_caps('chapter')}_{ch_num}.pdf",
                 parse_mode=ParseMode.DISABLED.value
             )
-
             # Return to chapter menu
             if session_id in sessions.chapter_sessions:
                 await callback.message.edit_text(
@@ -504,16 +510,11 @@ async def handle_download(client, callback: CallbackQuery):
                     reply_markup=await create_chapter_buttons(session_id),
                     parse_mode=ParseMode.DISABLED.value
                 )
+
+
     except Exception as e:
         logger.error(f"Download failed: {e}")
         await callback.answer("Download failed", show_alert=True)
     finally:
         if session_id in sessions.chapter_sessions:
             del sessions.chapter_sessions[session_id]
-        await mdex.close()
-
-# Cleanup on shutdown
-async def cleanup():
-    await mdex.close()
-
-# Register cleanup handler if needed
